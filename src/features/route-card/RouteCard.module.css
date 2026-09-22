@@ -1,0 +1,300 @@
+/**
+ * 白底大字卡纸面样式（需求 13.5～13.9）。
+ * 预览与导出共用同一样式作用域与同一 CardViewModel 实例。
+ */
+.paper {
+  background: var(--paper-bg);
+  color: var(--paper-text);
+  width: 360px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: var(--paper-font-small);
+  line-height: 1.5;
+}
+
+/* 续页承接标记 */
+.continuation {
+  color: var(--paper-secondary);
+  font-size: var(--paper-font-small);
+  border-bottom: 1px solid var(--paper-divider);
+  padding-bottom: 8px;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.title {
+  font-size: var(--paper-font-title);
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.subtitle,
+.dateLine {
+  color: var(--paper-secondary);
+  font-size: var(--paper-font-small);
+}
+
+.statusLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--paper-font-small);
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 4px 10px;
+  width: fit-content;
+}
+
+.statusLine.draft {
+  background: var(--paper-warn-bg);
+  color: var(--paper-warn-text);
+}
+
+.statusLine.violated {
+  background: var(--paper-error-bg);
+  color: var(--paper-error-text);
+}
+
+.statusLine.blocked {
+  background: var(--paper-error-bg);
+  color: var(--paper-error-text);
+}
+
+/* 摘要 */
+.summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  background: var(--paper-ok-bg);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.summaryItem {
+  display: flex;
+  flex-direction: column;
+}
+
+.summaryItem .label {
+  color: var(--paper-secondary);
+  font-size: var(--paper-font-small);
+}
+
+.summaryItem .value {
+  font-size: var(--paper-font-num);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.summaryItem .unit {
+  font-size: var(--paper-font-small);
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+.summaryItem .note {
+  font-size: 14px;
+  color: var(--paper-warn-text);
+}
+
+.summaryItem.warn .value {
+  color: var(--paper-warn-text);
+}
+
+.summaryItem.violated .value {
+  color: var(--paper-error-text);
+}
+
+/* 提醒条 */
+.notice {
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: var(--paper-font-small);
+  overflow-wrap: anywhere;
+}
+
+.notice.info {
+  background: var(--paper-ok-bg);
+  color: var(--paper-ok-text);
+}
+
+.notice.warning {
+  background: var(--paper-warn-bg);
+  color: var(--paper-warn-text);
+}
+
+.notice.error {
+  background: var(--paper-error-bg);
+  color: var(--paper-error-text);
+}
+
+.sectionTitle {
+  font-size: var(--paper-font-main);
+  font-weight: 600;
+  margin: 4px 0 0;
+}
+
+/* 节点 */
+.node {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nodeHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nodeIndex {
+  color: var(--paper-accent);
+  font-weight: 600;
+  font-size: var(--paper-font-main);
+}
+
+.nodeTitle {
+  font-size: var(--paper-font-main);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.nodeRole {
+  color: var(--paper-secondary);
+  font-size: var(--paper-font-small);
+  font-weight: 600;
+}
+
+.nodeMeta {
+  color: var(--paper-secondary);
+  font-size: var(--paper-font-small);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.badge {
+  font-size: 15px;
+  border-radius: 999px;
+  padding: 1px 8px;
+  background: var(--paper-ok-bg);
+  color: var(--paper-ok-text);
+}
+
+.badge.warning {
+  background: var(--paper-warn-bg);
+  color: var(--paper-warn-text);
+}
+
+.nodeNotice {
+  color: var(--paper-warn-text);
+  font-size: var(--paper-font-small);
+}
+
+/* 路段连接 */
+.leg {
+  border-left: 3px solid var(--paper-accent);
+  padding: 2px 0 2px 12px;
+  margin-left: 6px;
+  display: flex;
+  flex-direction: column;
+}
+
+.legMain {
+  font-size: var(--paper-font-small);
+  font-weight: 600;
+}
+
+.legSecondary {
+  color: var(--paper-secondary);
+  font-size: 15px;
+}
+
+.leg.missing {
+  border-left-color: var(--paper-warn-text);
+}
+
+.leg.missing .legMain {
+  color: var(--paper-warn-text);
+}
+
+/* 备注 */
+.note {
+  color: var(--paper-secondary);
+  font-size: var(--paper-font-small);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* 已跳过 */
+.skipped {
+  border: 1px dashed var(--paper-divider);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skippedTitle {
+  font-weight: 600;
+  font-size: var(--paper-font-small);
+}
+
+.skippedItem {
+  display: flex;
+  flex-direction: column;
+}
+
+.skippedItem .name {
+  font-size: var(--paper-font-small);
+}
+
+.skippedItem .note {
+  font-size: 15px;
+}
+
+/* 来源 */
+.source {
+  border-top: 1px solid var(--paper-divider);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sourceItem {
+  display: flex;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.sourceItem .label {
+  color: var(--paper-secondary);
+  flex-shrink: 0;
+}
+
+.checkText {
+  color: var(--paper-warn-text);
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+/* 页脚 */
+.footer {
+  margin-top: 4px;
+  color: var(--paper-secondary);
+  font-size: 14px;
+  text-align: center;
+  border-top: 1px solid var(--paper-divider);
+  padding-top: 8px;
+}

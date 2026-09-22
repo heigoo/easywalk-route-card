@@ -1,0 +1,40 @@
+{
+  "name": "easywalk-route-card",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "省脚力路线卡 / EasyWalk Route Card — 大字版路线卡编辑与导出工具",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "server:dev": "tsx server/index.ts",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.2",
+    "html-to-image": "^1.11.11",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.0.1",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@playwright/test": "^1.48.2",
+    "@vitejs/plugin-react": "^4.3.2",
+    "fastify": "^4.28.1",
+    "jsdom": "^25.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "~5.6.3",
+    "vite": "^5.4.9",
+    "vitest": "^2.1.3"
+  }
+}

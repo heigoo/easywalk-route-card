@@ -1,0 +1,186 @@
+.app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-bg);
+  color: var(--text-primary);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-4) var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-title);
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-small);
+}
+
+.saveState {
+  font-size: var(--font-small);
+  color: var(--text-secondary);
+  padding-top: var(--sp-2);
+}
+
+.saveError {
+  color: var(--warn-text);
+}
+
+.tabs {
+  display: flex;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4) var(--sp-3);
+}
+
+.tab {
+  flex: 1;
+  min-height: 44px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--control-border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: var(--font-body);
+}
+
+.tab.active {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  border-color: var(--primary);
+  font-weight: 600;
+}
+
+.mainNarrow {
+  flex: 1;
+  padding: 0 var(--sp-4) calc(72px + env(safe-area-inset-bottom));
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* 窄屏预览：纸面容器左右不留页面留白，360px 视口下纸面 1:1（第 10.3 节）；
+   留白由卡片自身 16px 内边距承担；工具栏自带留白 */
+.mainPreviewNarrow {
+  flex: 1;
+  width: 100%;
+  margin: 0 auto;
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+}
+
+.mainWide {
+  flex: 1;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--sp-2) var(--sp-6) var(--sp-12);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--sp-6);
+  align-items: start;
+}
+
+.editorColumn {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+/* P1 自动规划增强分区（默认收起） */
+.p1Section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-card);
+  padding: var(--sp-4);
+}
+
+.p1Header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.p1Toggle {
+  min-height: 44px;
+  min-width: 64px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--control-border);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: var(--font-small);
+}
+
+.p1Hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-small);
+}
+
+.previewColumn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  position: sticky;
+  top: var(--sp-4);
+}
+
+/* 窄屏预览：工具栏与导出面板保留 16px 留白，纸面全幅 1:1（第 10.3 节） */
+.previewColumnNarrow {
+  padding: 0 var(--sp-4);
+}
+
+.previewColumnNarrow .previewAreaFullBleed {
+  margin: 0 calc(-1 * var(--sp-4));
+}
+
+.columnTitle {
+  margin: 0;
+  font-size: var(--font-section);
+  font-weight: 600;
+}
+
+.backBtn {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius-input);
+  border: 1px solid var(--control-border);
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.bottomBar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--divider);
+  z-index: 30;
+}
+
+.bottomPrimary {
+  width: 100%;
+  min-height: 48px;
+  border: none;
+  border-radius: var(--radius-input);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: var(--font-body);
+  font-weight: 600;
+}

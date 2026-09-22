@@ -1,0 +1,9 @@
+.previewArea {
+  width: 100%;
+}
+
+.scaleNote {
+  margin: var(--sp-2) 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-small);
+}

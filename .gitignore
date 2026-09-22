@@ -1,0 +1,29 @@
+# 依赖目录
+node_modules/
+
+# 构建产物
+dist/
+build/
+*.tsbuildinfo
+
+# 本地环境与真实凭据（严禁提交真实 Key）
+.env
+.env.*
+!.env.example
+
+# 日志与临时文件
+logs/
+*.log
+.tmp/
+.tmp-*
+
+# 测试产物
+playwright-report/
+test-results/
+coverage/
+
+# 私有截图与导出图片
+screenshots/
+*.local.png
+
+.iga/

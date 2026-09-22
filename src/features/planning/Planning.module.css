@@ -1,0 +1,143 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  padding: var(--sp-4);
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-section);
+  font-weight: 600;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-3);
+}
+
+@media (min-width: 640px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.runRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.stage {
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-small);
+}
+
+.warning {
+  margin: 0;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border-radius: var(--radius-input);
+  padding: var(--sp-3);
+  font-size: var(--font-small);
+}
+
+.error {
+  margin: 0;
+  color: var(--error-text);
+  background: var(--error-bg);
+  border-radius: var(--radius-input);
+  padding: var(--sp-3);
+  font-size: var(--font-small);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  background: var(--surface-raised);
+  border-radius: var(--radius-input);
+  padding: var(--sp-4);
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.candidate {
+  background: var(--surface-raised);
+  border-radius: var(--radius-input);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.candidateHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.candidateLabel {
+  font-weight: 600;
+}
+
+.badge {
+  font-size: var(--font-small);
+  border-radius: 999px;
+  padding: 2px var(--sp-2);
+  background: var(--ok-bg);
+  color: var(--ok-text);
+}
+
+.badgeWarn {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.candidateMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+}
+
+.order {
+  margin: 0;
+  padding-left: var(--sp-6);
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+}
+
+.order li {
+  overflow-wrap: anywhere;
+}
+
+.details summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+  padding: var(--sp-2) 0;
+}

@@ -1,0 +1,119 @@
+/**
+ * 语义设计令牌（需求 13.5～13.7 节）。
+ * 全部以 HSL 存储；组件只引用令牌，不散写任意颜色。
+ * 两个视觉上下文：深色编辑区（:root）与白底纸面（.paper）。
+ */
+:root {
+  /* 编辑工作区（中性黑灰） */
+  --app-bg: hsl(0 0% 5.1%);
+  --surface: hsl(0 0% 8.24%);
+  --surface-raised: hsl(0 0% 11.37%);
+  --surface-hover: hsl(0 0% 14.12%);
+  --divider: hsl(0 0% 14.9%);
+  --control-border: hsl(0 0% 43.92%);
+  --text-primary: hsl(0 0% 96.08%);
+  --text-secondary: hsl(0 0% 72.16%);
+  --text-muted: hsl(0 0% 61.18%);
+  --primary: hsl(131.35 54.15% 40.2%);
+  --primary-hover: hsl(131.13 50.82% 47.84%);
+  --on-primary: hsl(0 0% 5.1%);
+  --danger: hsl(0 73.71% 41.76%);
+  --on-danger: hsl(0 0% 100%);
+
+  /* 状态色（文字 / 背景） */
+  --ok-text: hsl(140 45% 55%);
+  --ok-bg: hsl(135 25% 12%);
+  --warn-text: hsl(38 80% 66%);
+  --warn-bg: hsl(36 32% 13%);
+  --error-text: hsl(0 90% 78%);
+  --error-bg: hsl(0 25% 15%);
+  --info-text: var(--text-secondary);
+  --info-bg: var(--surface-raised);
+
+  /* 字号（编辑区） */
+  --font-title: 28px;
+  --font-section: 20px;
+  --font-body: 16px;
+  --font-small: 14px;
+
+  /* 间距刻度 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  --radius-input: 10px;
+  --radius-card: 16px;
+  --radius-dialog: 20px;
+  --control-height: 48px;
+
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  color-scheme: dark;
+}
+
+/* 白底纸面（路线卡阅读与导出上下文） */
+.paper {
+  --paper-bg: hsl(0 0% 100%);
+  --paper-text: hsl(0 0% 9.02%);
+  --paper-secondary: hsl(0 0% 32.16%);
+  --paper-accent: hsl(142.78 64.23% 24.12%);
+  --paper-ok-text: hsl(142.78 64.23% 24.12%);
+  --paper-ok-bg: hsl(138 40% 94%);
+  --paper-warn-text: hsl(33 80% 30%);
+  --paper-warn-bg: hsl(45 100% 92%);
+  --paper-error-text: hsl(0 70% 35%);
+  --paper-error-bg: hsl(0 70% 95%);
+  --paper-divider: hsl(0 0% 88%);
+  --paper-font-num: 32px;
+  --paper-font-title: 28px;
+  --paper-font-main: 22px;
+  --paper-font-small: 18px;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--app-bg);
+  color: var(--text-primary);
+  font-size: var(--font-body);
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.paper :focus-visible {
+  outline-color: var(--paper-accent);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+/* 减少动态效果的系统设置（D16） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
