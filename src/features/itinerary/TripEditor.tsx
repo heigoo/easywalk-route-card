@@ -2,8 +2,8 @@
  * 行程编辑视图（UI-02；需求 R01/R02/R03/R07）。
  * 主编辑区有效修改自动保存；节点/路段用局部草稿弹层，确认才提交。
  */
-import { useMemo, useState } from 'react';
-import type { Itinerary, Leg, RouteNode } from '../../../shared/contracts/domain';
+import { useMemo, useRef, useState } from 'react';
+import type { Itinerary, Leg } from '../../../shared/contracts/domain';
 import { activeSequence } from '../../../shared/contracts/domain';
 import type { TripStats } from '../../domain/compute';
 import type { CardStatus } from '../../domain/status';
@@ -22,13 +22,14 @@ import {
   skipNode,
   updateBasics,
   updateNode,
-  upsertNodeFacilityFact,
+  upsertFacilityFactForTarget,
   upsertPlace,
 } from '../../domain/itinerary';
 import { ceilMinutes } from '../../domain/format';
+import { parseItineraryBackup, serializeItineraryBackup } from '../../storage/local';
 import { TextField } from '../../components/fields';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
-import { NodeEditDialog } from './NodeEditDialog';
+import { NodeEditDialog, type NodeSavePatch } from './NodeEditDialog';
 import { LegEditDialog, type LegSavePatch } from './LegEditDialog';
 import { AddNodeDialog } from './AddNodeDialog';
 import { FacilityDialog } from '../facilities/FacilityDialog';
@@ -42,12 +43,31 @@ export interface TripEditorProps {
   cardStatus: CardStatus;
   onShowPreview: () => void;
   onDeleteAll: () => void;
+  /** 导入备份确认后：整体替换当前行程并按既有机制持久化 */
+  onReplaceItinerary: (next: Itinerary) => void;
 }
 
 interface LegTarget {
   leg: Leg;
   fromName: string;
   toName: string;
+}
+
+/** 导入失败的持久错误文案（不用一闪而过的提示；当前行程保持不变） */
+const IMPORT_ERROR_TEXT: Record<string, string> = {
+  invalidJson: '文件不是合法 JSON',
+  unsupported: '备份版本无法识别',
+  invalidShape: '备份内容不完整',
+};
+
+/** 读取备份文件文本（FileReader：浏览器与测试环境均可用） */
+function readFileText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error('读取失败'));
+    reader.readAsText(file);
+  });
 }
 
 export function TripEditor({
@@ -57,23 +77,27 @@ export function TripEditor({
   cardStatus,
   onShowPreview,
   onDeleteAll,
+  onReplaceItinerary,
 }: TripEditorProps) {
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLeg, setEditingLeg] = useState<LegTarget | null>(null);
   const [adding, setAdding] = useState<'visit' | 'rest' | null>(null);
   const [facilityNodeId, setFacilityNodeId] = useState<string | null>(null);
+  const [facilityLegId, setFacilityLegId] = useState<string | null>(null);
   const [confirmSkipId, setConfirmSkipId] = useState<string | null>(null);
   const [confirmDeleteNodeId, setConfirmDeleteNodeId] = useState<string | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [confirmAdoptAll, setConfirmAdoptAll] = useState(false);
+  const [pendingImport, setPendingImport] = useState<Itinerary | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const seq = useMemo(() => activeSequence(it), [it]);
   const activeVisits = seq.filter((id) => it.nodes[id]?.kind === 'visit');
   const visitIndex = new Map(activeVisits.map((id, i) => [id, i + 1]));
   const skippedNodes = it.nodeOrder.map((id) => it.nodes[id]).filter((n) => n?.skipped);
 
-  const amapReadyLegs = Object.values(it.legs).filter(
-    (l) => l.durationSource === 'amap' && l.state === 'ready',
-  );
+  const amapLegs = Object.values(it.legs).filter((l) => l.durationSource === 'amap');
 
   const nameOf = (id: string): string => {
     if (it.origin?.id === id) return it.places[it.origin.placeId]?.name ?? '起点';
@@ -97,15 +121,21 @@ export function TripEditor({
     });
   };
 
-  const saveNodePatch = (nodeId: string) => (patch: { name: string; entranceConfirmed?: boolean } & Partial<RouteNode>) => {
+  const saveNodePatch = (nodeId: string) => (patch: NodeSavePatch) => {
     apply((prev) => {
       const node = prev.nodes[nodeId];
       if (!node) return prev;
-      let next = upsertPlace(prev, { ...prev.places[node.placeId], name: patch.name });
+      const { name: _name, entranceConfirmed: _entrance, placePatch, ...nodePatch } = patch;
+      // 地点级开放事实写在 PlaceRef 上；placePatch 缺省＝本次不修改
+      let next = upsertPlace(prev, {
+        ...prev.places[node.placeId],
+        name: patch.name,
+        ...(placePatch?.openingDescription ? { openingDescription: placePatch.openingDescription } : {}),
+        ...(placePatch?.openingSchedule ? { openingSchedule: placePatch.openingSchedule } : {}),
+      });
       if (patch.entranceConfirmed !== undefined) {
         next = confirmEntrance(next, node.placeId, patch.entranceConfirmed);
       }
-      const { name: _name, entranceConfirmed: _entrance, ...nodePatch } = patch;
       next = updateNode(next, nodeId, nodePatch);
       return next;
     });
@@ -126,6 +156,37 @@ export function TripEditor({
     if (!confirmSkipId) return;
     apply((prev) => skipNode(prev, confirmSkipId));
     setConfirmSkipId(null);
+  };
+
+  /** 导出备份文件：文件名=省脚力路线卡-{行程名称或“未命名”}-{出游日期或“无日期”}.json */
+  const exportBackup = () => {
+    const blob = new Blob([serializeItineraryBackup(it)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `省脚力路线卡-${it.title.trim() || '未命名'}-${it.travelDate ?? '无日期'}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /** 导入备份：解析失败保持当前行程不变并持续显示原因；成功先进二次确认 */
+  const importBackupFile = async (file: File) => {
+    let text: string;
+    try {
+      text = await readFileText(file);
+    } catch {
+      setPendingImport(null);
+      setImportError(`${IMPORT_ERROR_TEXT.invalidJson}，当前行程保持不变`);
+      return;
+    }
+    const result = parseItineraryBackup(text);
+    if (!result.ok) {
+      setPendingImport(null);
+      setImportError(`${IMPORT_ERROR_TEXT[result.error] ?? IMPORT_ERROR_TEXT.invalidShape}，当前行程保持不变`);
+      return;
+    }
+    setImportError(null);
+    setPendingImport(result.itinerary);
   };
 
   return (
@@ -176,22 +237,17 @@ export function TripEditor({
         <SummaryItem label="计划休息" value={stats.plannedRestCount} unit="次" warn={false} />
       </div>
 
-      {amapReadyLegs.length > 0 ? (
+      {amapLegs.length > 0 ? (
         <div className={`${styles.reminder} info`} role="note">
           <span>
-            有 {amapReadyLegs.length} 段步行时间来自地图查询，仅当前会话有效；采纳后可离线查看与导出。
+            有 {amapLegs.length} 段步行时间来自地图查询，仅当前会话有效；采纳后可离线查看与导出。
           </span>
           <button
             type="button"
             className={`${styles.btn} ${styles.primary} ${styles.small}`}
-            onClick={() =>
-              apply((prev) => {
-                const { itinerary } = adoptAllMapLegs(prev);
-                return itinerary;
-              })
-            }
+            onClick={() => setConfirmAdoptAll(true)}
           >
-            采纳全部路段时间
+            采纳全部地图估算（{amapLegs.length} 段）
           </button>
         </div>
       ) : null}
@@ -209,10 +265,23 @@ export function TripEditor({
           if (it.origin?.id === id || it.destination?.id === id) {
             const isOrigin = it.origin?.id === id;
             const placeName = nameOf(id);
+            // 终点前也有路段：与景点分支同样渲染 LegRow（起点是 seq[0]，其前无路段，legBefore 返回 undefined）
+            const leg = legBefore(id, idx);
             return (
-              <div key={id} className={styles.nodeCard} style={{ opacity: 0.9 }}>
-                <div className={styles.nodeHead}>
-                  <span className={styles.nodeTitle}>{isOrigin ? '起点' : '终点'} · {placeName || '未设置'}</span>
+              <div key={id} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                {leg ? (
+                  <LegRow
+                    leg={leg}
+                    fromName={nameOf(seq[idx - 1])}
+                    toName={nameOf(id)}
+                    onEdit={() => setEditingLeg({ leg, fromName: nameOf(seq[idx - 1]), toName: nameOf(id) })}
+                    onRecordStairs={() => setFacilityLegId(leg.id)}
+                  />
+                ) : null}
+                <div className={styles.nodeCard} style={{ opacity: 0.9 }}>
+                  <div className={styles.nodeHead}>
+                    <span className={styles.nodeTitle}>{isOrigin ? '起点' : '终点'} · {placeName || '未设置'}</span>
+                  </div>
                 </div>
               </div>
             );
@@ -228,11 +297,13 @@ export function TripEditor({
                   fromName={nameOf(seq[idx - 1])}
                   toName={nameOf(id)}
                   onEdit={() => setEditingLeg({ leg, fromName: nameOf(seq[idx - 1]), toName: nameOf(id) })}
+                  onRecordStairs={() => setFacilityLegId(leg.id)}
                 />
               ) : null}
               <RouteNodeCard
                 node={node}
                 place={it.places[node.placeId]}
+                facilities={it.facilities.filter((f) => f.target.type === 'node' && f.target.nodeId === id)}
                 index={node.kind === 'visit' ? (visitIndex.get(id) ?? null) : null}
                 isFirst={idx === (it.origin ? 1 : 0)}
                 isLast={idx === seq.length - (it.destination ? 2 : 1)}
@@ -284,6 +355,35 @@ export function TripEditor({
         </button>
       </div>
 
+      <div className={styles.backupRow}>
+        <span className={styles.backupHint}>
+          备份与恢复：导出 JSON 备份文件，清缓存或换设备后可从备份恢复（未采纳的地图估算不随备份导出）。
+        </span>
+        <button type="button" className={styles.btn} onClick={exportBackup}>
+          导出备份
+        </button>
+        <button type="button" className={styles.btn} onClick={() => importInputRef.current?.click()}>
+          导入备份
+        </button>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept="application/json,.json"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0] ?? null;
+            e.target.value = '';
+            if (file) void importBackupFile(file);
+          }}
+        />
+      </div>
+
+      {importError ? (
+        <div className={`${styles.reminder} error`} role="alert">
+          <span>{importError}</span>
+        </div>
+      ) : null}
+
       <div className={styles.dangerZone}>
         <button type="button" className={`${styles.btn} ${styles.danger} ${styles.small}`} onClick={() => setConfirmDeleteAll(true)}>
           删除整份行程
@@ -294,6 +394,8 @@ export function TripEditor({
         open={editingNodeId !== null}
         node={editingNodeId ? (it.nodes[editingNodeId] ?? null) : null}
         place={editingNodeId ? (it.places[it.nodes[editingNodeId]?.placeId ?? ''] ?? null) : null}
+        travelDate={it.travelDate}
+        timezone={it.timezone}
         onClose={() => setEditingNodeId(null)}
         onSave={editingNodeId ? saveNodePatch(editingNodeId) : () => undefined}
       />
@@ -327,11 +429,16 @@ export function TripEditor({
       />
 
       <FacilityDialog
-        open={facilityNodeId !== null}
+        open={facilityNodeId !== null || facilityLegId !== null}
         node={facilityNodeId ? (it.nodes[facilityNodeId] ?? null) : null}
+        legId={facilityLegId}
+        preset={facilityLegId !== null ? 'stairs' : undefined}
         itinerary={it}
-        onClose={() => setFacilityNodeId(null)}
-        onSave={(nodeId, kind, key, fact) => apply((p) => upsertNodeFacilityFact(p, nodeId, kind, key, fact))}
+        onClose={() => {
+          setFacilityNodeId(null);
+          setFacilityLegId(null);
+        }}
+        onSave={(target, kind, key, fact) => apply((p) => upsertFacilityFactForTarget(p, target, kind, key, fact))}
       />
 
       <ConfirmDialog
@@ -354,6 +461,31 @@ export function TripEditor({
           setConfirmDeleteNodeId(null);
         }}
         onCancel={() => setConfirmDeleteNodeId(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmAdoptAll}
+        title="采纳全部地图估算？"
+        description={`确认后将对 ${amapLegs.length} 段地图估算路段写入采纳。采纳后按你的估计保存、可在本机离线查看；采纳≠实地核实，来源与获取时间保留。`}
+        confirmText="确认采纳"
+        onConfirm={() => {
+          setConfirmAdoptAll(false);
+          apply((prev) => adoptAllMapLegs(prev).itinerary);
+        }}
+        onCancel={() => setConfirmAdoptAll(false)}
+      />
+
+      <ConfirmDialog
+        open={pendingImport !== null}
+        title="导入备份？"
+        description="导入将覆盖当前行程，是否继续？"
+        confirmText="确认导入"
+        danger
+        onConfirm={() => {
+          if (pendingImport) onReplaceItinerary(pendingImport);
+          setPendingImport(null);
+        }}
+        onCancel={() => setPendingImport(null)}
       />
 
       <ConfirmDialog
@@ -384,19 +516,41 @@ function SummaryItem({ label, value, unit, warn, note }: { label: string; value:
   );
 }
 
-function LegRow({ leg, fromName, toName, onEdit }: { leg: Leg; fromName: string; toName: string; onEdit: () => void }) {
+function LegRow({
+  leg,
+  fromName,
+  toName,
+  onEdit,
+  onRecordStairs,
+}: {
+  leg: Leg;
+  fromName: string;
+  toName: string;
+  onEdit: () => void;
+  onRecordStairs: () => void;
+}) {
   const ready = leg.state === 'ready' || leg.state === 'stale';
   const text = ready
     ? `步行约 ${Math.ceil((leg.effectiveWalkingSeconds ?? 0) / 60)} 分钟${leg.mode === 'manual-transfer' ? '（含接驳）' : ''}`
     : leg.state === 'loading'
       ? '正在获取…'
       : '步行时间待补充';
+  // 地图报告了阶梯才提示；未返回不生成“无台阶”结论（未知不等于没有）
+  const stairsReported = leg.reportedFeatures.some((f) => f.kind === 'stairs');
   return (
     <div className={`${styles.legRow} ${ready ? '' : 'missing'}`}>
       <span aria-live="polite">
         ↓ {text}
         {leg.durationSource === 'adopted' ? ' · 已采纳地图估算' : ''}
       </span>
+      {stairsReported ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          <span>高德标注本段可能有阶梯（待核对）</span>
+          <button type="button" className={`${styles.btn} ${styles.small}`} onClick={onRecordStairs}>
+            记录台阶核对
+          </button>
+        </span>
+      ) : null}
       <button type="button" className={`${styles.btn} ${styles.small}`} onClick={onEdit} aria-label={`编辑路段 ${fromName} 到 ${toName}`}>
         编辑
       </button>

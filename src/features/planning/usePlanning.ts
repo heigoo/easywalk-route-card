@@ -161,6 +161,8 @@ export function usePlanning(
         providerApiVersion: e.providerApiVersion,
         fetchedAt: e.fetchedAt,
         state: e.state,
+        // 地图报告属性（如阶梯）随会话地图值保留，供路段提示与核对入口使用
+        reportedFeatures: e.reportedFeatures,
       }));
 
       const edges: Record<string, number | null> = {};

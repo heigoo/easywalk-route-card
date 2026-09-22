@@ -7,6 +7,9 @@ import type {
   Endpoint,
   EndpointRole,
   Fact,
+  FacilityKind,
+  FacilityRecord,
+  FacilityTarget,
   Itinerary,
   Leg,
   PlaceRef,
@@ -313,6 +316,7 @@ export function rebuildLegs(it: Itinerary): Itinerary {
         provider: null,
         state: 'ready',
         failureCode: null,
+        reportedFeatures: [],
       };
       newLegs[zero.id] = zero;
       usedLegIds.add(zero.id);
@@ -352,6 +356,7 @@ export function rebuildLegs(it: Itinerary): Itinerary {
         provider: null,
         state: 'missing',
         failureCode: null,
+        reportedFeatures: [],
       };
       newLegs[leg.id] = leg;
       usedLegIds.add(leg.id);
@@ -456,6 +461,8 @@ export function applyMatrixEdges(
     providerApiVersion: string | null;
     fetchedAt: string;
     state: 'ready' | 'unreachable';
+    /** 地图报告属性（如阶梯）；缺失按空处理，不生成“无阶梯”结论 */
+    reportedFeatures?: Array<{ kind: string; note: string }>;
   }>,
 ): Itinerary {
   const legs = { ...it.legs };
@@ -480,6 +487,8 @@ export function applyMatrixEdges(
         fetchedAt: edge.fetchedAt,
         provider: edge.provider,
         providerApiVersion: edge.providerApiVersion,
+        // 不可达边没有可走路线，也就没有地图报告属性
+        reportedFeatures: [],
       };
       continue;
     }
@@ -496,6 +505,7 @@ export function applyMatrixEdges(
       fetchedAt: edge.fetchedAt,
       provider: edge.provider,
       providerApiVersion: edge.providerApiVersion,
+      reportedFeatures: edge.reportedFeatures ?? [],
     };
   }
   return touch({ ...it, legs });
@@ -577,6 +587,8 @@ export function restoreLegToMapValue(it: Itinerary, legId: string): Itinerary {
     fetchedAt: null,
     state: 'missing',
     failureCode: null,
+    // 地图报告属性一并清除，回到待确认
+    reportedFeatures: [],
   };
   return touch({ ...it, legs: { ...it.legs, [legId]: next } });
 }
@@ -594,6 +606,43 @@ export function upsertFacilityFact(
   return touch({ ...it, facilities });
 }
 
+/** 确保 target（place / node / leg）上存在指定种类的设施记录，并写入一个事实（第 4.4 节） */
+export function upsertFacilityFactForTarget(
+  it: Itinerary,
+  target: FacilityTarget,
+  kind: FacilityKind,
+  factKey: string,
+  fact: Fact<unknown>,
+): Itinerary {
+  const existing = it.facilities.find(
+    (f) => f.kind === kind && isSameFacilityTarget(f.target, target),
+  );
+  if (existing) return upsertFacilityFact(it, existing.id, factKey, fact);
+  const record: FacilityRecord = {
+    id: newId(),
+    kind,
+    placeId: placeIdOfFacilityTarget(it, target),
+    target,
+    facts: { [factKey]: fact },
+  };
+  return touch({ ...it, facilities: [...it.facilities, record] });
+}
+
+function isSameFacilityTarget(a: FacilityTarget, b: FacilityTarget): boolean {
+  if (a.type !== b.type) return false;
+  if (a.type === 'place' && b.type === 'place') return a.placeId === b.placeId;
+  if (a.type === 'node' && b.type === 'node') return a.nodeId === b.nodeId;
+  if (a.type === 'leg' && b.type === 'leg') return a.legId === b.legId;
+  return false;
+}
+
+/** 设施记录的地点旁挂：node 挂其地点；路段跨两个地点，不归属单一地点 */
+function placeIdOfFacilityTarget(it: Itinerary, target: FacilityTarget): string | null {
+  if (target.type === 'place') return target.placeId;
+  if (target.type === 'node') return it.nodes[target.nodeId]?.placeId ?? null;
+  return null;
+}
+
 /** 确保节点上存在指定种类的设施记录，并写入一个事实（第 4.4 节） */
 export function upsertNodeFacilityFact(
   it: Itinerary,
@@ -602,18 +651,7 @@ export function upsertNodeFacilityFact(
   factKey: string,
   fact: Fact<unknown>,
 ): Itinerary {
-  const existing = it.facilities.find(
-    (f) => f.kind === kind && f.target.type === 'node' && f.target.nodeId === nodeId,
-  );
-  if (existing) return upsertFacilityFact(it, existing.id, factKey, fact);
-  const record = {
-    id: newId(),
-    kind,
-    placeId: it.nodes[nodeId]?.placeId ?? null,
-    target: { type: 'node' as const, nodeId },
-    facts: { [factKey]: fact },
-  };
-  return touch({ ...it, facilities: [...it.facilities, record] });
+  return upsertFacilityFactForTarget(it, { type: 'node', nodeId }, kind, factKey, fact);
 }
 
 /** 跳站后是否存在“待补充/待获取”的路段（编辑区提示用） */

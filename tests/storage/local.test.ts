@@ -2,6 +2,7 @@
  * 本地保存与持久化白名单（第 8.4、8.5 节；T22 离线口径）。
  */
 import { describe, expect, it } from 'vitest';
+import { SCHEMA_VERSION } from '../../shared/contracts/domain';
 import {
   addVisitNode,
   adoptAllMapLegs,
@@ -10,7 +11,13 @@ import {
   setEndpoint,
   upsertPlace,
 } from '../../src/domain/itinerary';
-import { createLocalStore, toPersisted, STORAGE_KEY } from '../../src/storage/local';
+import {
+  createLocalStore,
+  parseItineraryBackup,
+  serializeItineraryBackup,
+  toPersisted,
+  STORAGE_KEY,
+} from '../../src/storage/local';
 import { makePlace } from '../helpers';
 
 function memoryBackend() {
@@ -23,7 +30,7 @@ function memoryBackend() {
   };
 }
 
-function sampleWithAmapLeg() {
+function sampleWithAmapLeg(reportedFeatures: Array<{ kind: string; note: string }> = []) {
   let it = createEmptyItinerary('2026-09-22T00:00:00.000Z');
   const pO = makePlace('示例起点', 116.397, 39.908);
   const pB = makePlace('示例景点B', 116.406, 39.914);
@@ -44,6 +51,7 @@ function sampleWithAmapLeg() {
       providerApiVersion: 'v5',
       fetchedAt: '2026-09-22T01:00:00.000Z',
       state: 'ready',
+      reportedFeatures,
     },
   ]);
   return it;
@@ -101,6 +109,66 @@ describe('持久化白名单（第 8.5 节）', () => {
     const fact = persisted.facilities[0].facts.open as { value: unknown; reviewState: string };
     expect(fact.value).toBeNull();
     expect(fact.reviewState).toBe('unknown');
+  });
+
+  it('地图报告属性（如阶梯）随会话进入 Leg，但不落盘，重载回到待确认（R-A3）', () => {
+    const it = sampleWithAmapLeg([{ kind: 'stairs', note: '高德标注阶梯' }]);
+    const leg = Object.values(it.legs)[0];
+    expect(leg.reportedFeatures).toEqual([{ kind: 'stairs', note: '高德标注阶梯' }]);
+    const persisted = toPersisted(it);
+    expect(Object.values(persisted.legs)[0].reportedFeatures).toEqual([]);
+  });
+});
+
+describe('备份导出与导入（第 8.5 节）', () => {
+  it('导出→导入 roundtrip：数据一致（走持久化白名单）', () => {
+    const it = sampleWithAmapLeg([{ kind: 'stairs', note: '高德标注阶梯' }]);
+    const parsed = parseItineraryBackup(serializeItineraryBackup(it));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.itinerary).toEqual(toPersisted(it));
+  });
+
+  it('导出内容符合白名单：未采纳 amap 路段时长与地图报告值不随导出', () => {
+    const text = serializeItineraryBackup(sampleWithAmapLeg([{ kind: 'stairs', note: '高德标注阶梯' }]));
+    const raw = JSON.parse(text) as {
+      schemaVersion: number;
+      legs: Record<string, { rawWalkingSeconds: number | null; effectiveWalkingSeconds: number | null; state: string; reportedFeatures: unknown[] }>;
+    };
+    expect(raw.schemaVersion).toBe(SCHEMA_VERSION);
+    const leg = Object.values(raw.legs)[0];
+    expect(leg.rawWalkingSeconds).toBeNull();
+    expect(leg.effectiveWalkingSeconds).toBeNull();
+    expect(leg.state).toBe('missing');
+    expect(leg.reportedFeatures).toEqual([]);
+  });
+
+  it('旧数据缺失 reportedFeatures 仍可解析并补默认空数组（契约 additive）', () => {
+    const legacy = JSON.parse(serializeItineraryBackup(sampleWithAmapLeg())) as {
+      legs: Record<string, Record<string, unknown>>;
+    };
+    const legacyLeg = Object.values(legacy.legs)[0];
+    delete legacyLeg.reportedFeatures;
+    const parsed = parseItineraryBackup(JSON.stringify(legacy));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(Object.values(parsed.itinerary.legs)[0].reportedFeatures).toEqual([]);
+  });
+
+  it('parseItineraryBackup：非法 JSON → invalidJson', () => {
+    expect(parseItineraryBackup('{这不是 JSON')).toEqual({ ok: false, error: 'invalidJson' });
+  });
+
+  it('parseItineraryBackup：未识别 schemaVersion → unsupported', () => {
+    expect(parseItineraryBackup(JSON.stringify({ schemaVersion: 999, id: 'x' }))).toEqual({
+      ok: false,
+      error: 'unsupported',
+    });
+  });
+
+  it('parseItineraryBackup：结构不合法 → invalidShape', () => {
+    expect(parseItineraryBackup(JSON.stringify({ schemaVersion: SCHEMA_VERSION, id: 'x' }))).toEqual({
+      ok: false,
+      error: 'invalidShape',
+    });
   });
 });
 

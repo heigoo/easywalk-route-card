@@ -1,14 +1,17 @@
 /**
  * 景点节点卡（需求 13.7）：序号、名称、停留/园内步行、提醒、操作。
  * 必去/可选/已跳过状态用文字+徽标共同表达，不只靠颜色。
+ * 设施摘要（Task 3）：显示已记录的厕所/歇脚点候选（名称＋属性状态），措辞含“候选”。
  */
-import type { PlaceRef, RouteNode } from '../../../shared/contracts/domain';
+import type { Fact, FacilityRecord, PlaceRef, RouteNode } from '../../../shared/contracts/domain';
 import { ceilMinutes } from '../../domain/format';
 import styles from './Editor.module.css';
 
 export interface RouteNodeCardProps {
   node: RouteNode;
   place: PlaceRef | undefined;
+  /** 该节点已记录的设施记录（厕所/歇脚点候选摘要用） */
+  facilities?: FacilityRecord[];
   index: number | null;
   isFirst: boolean;
   isLast: boolean;
@@ -20,9 +23,42 @@ export interface RouteNodeCardProps {
   onDelete: () => void;
 }
 
+/** 单条设施记录 → “名称＋属性状态”摘要；无名且属性未核对的不显示（未知不等于没有） */
+function facilitySummary(f: FacilityRecord): string | null {
+  const facts = f.facts as Record<string, Fact<unknown> | undefined>;
+  const rawName = facts.name?.value;
+  const name = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : null;
+  if (f.kind === 'rest-candidate') {
+    const seat = facts.seat;
+    const checked = seat?.reviewState === 'userChecked';
+    if (!name && !checked) return null;
+    const status = !checked
+      ? '座位待确认'
+      : seat?.value === true
+        ? '你已核对：可坐'
+        : seat?.value === false
+          ? '你已核对：不可坐'
+          : '你已核对';
+    return name ? `歇脚点候选：${name}（${status}）` : `歇脚点候选（${status}）`;
+  }
+  if (f.kind === 'toilet') {
+    const open = facts.open;
+    const checked = open?.reviewState === 'userChecked';
+    if (!name && !checked) return null;
+    const status = !checked
+      ? '待确认'
+      : open?.value
+        ? `你已核对：${String(open.value)}`
+        : '你已核对';
+    return name ? `厕所：${name}（${status}）` : `厕所（${status}）`;
+  }
+  return null;
+}
+
 export function RouteNodeCard({
   node,
   place,
+  facilities = [],
   index,
   isFirst,
   isLast,
@@ -34,6 +70,7 @@ export function RouteNodeCard({
   onDelete,
 }: RouteNodeCardProps) {
   const isVisit = node.kind === 'visit';
+  const facilityLines = facilities.map(facilitySummary).filter((t): t is string => t !== null);
   return (
     <article className={styles.nodeCard} aria-label={place?.name ?? '节点'}>
       <div className={styles.nodeHead}>
@@ -59,6 +96,14 @@ export function RouteNodeCard({
         )}
         {node.kind === 'rest' && node.seatFact.value !== true ? <span>座位待确认</span> : null}
       </div>
+
+      {facilityLines.length > 0 ? (
+        <ul className={styles.facilitySummary} aria-label="设施摘要">
+          {facilityLines.map((text, i) => (
+            <li key={`${text}-${i}`}>{text}</li>
+          ))}
+        </ul>
+      ) : null}
 
       {node.notes.trim() ? <div className={styles.nodeNotes}>{node.notes.trim()}</div> : null}
 

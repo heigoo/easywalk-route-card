@@ -54,6 +54,44 @@
   font-size: var(--font-small);
 }
 
+/* 开放时间（R-A2） */
+.openingBox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-input);
+  padding: var(--sp-3);
+}
+
+.openingValue {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+.openingTag {
+  border-radius: 999px;
+  padding: 2px var(--sp-2);
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.openingRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.openingRow input {
+  width: 6.5em;
+}
+
 /* 汇总条 */
 .summary {
   background: var(--surface);
@@ -289,9 +327,133 @@
   font-weight: 600;
 }
 
+/* 备份导出/导入（数据可携带） */
+.backupRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.backupHint {
+  flex: 1 1 100%;
+  color: var(--text-muted);
+  font-size: var(--font-small);
+}
+
 .dangerZone {
   border-top: 1px solid var(--divider);
   padding-top: var(--sp-4);
   display: flex;
   justify-content: flex-end;
+}
+
+/* 附近候选与设施摘要（Task 3） */
+.candidateBox {
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-input);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.boxTitle {
+  font-size: var(--font-small);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.searchRow {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.boxHint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-small);
+}
+
+.boxError {
+  margin: 0;
+  color: var(--error-text);
+  background: var(--error-bg);
+  border-radius: var(--radius-input);
+  padding: var(--sp-3);
+  font-size: var(--font-small);
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.candidateList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.candidateItem {
+  background: var(--surface-raised);
+  border-radius: var(--radius-input);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.candidateHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.candidateName {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.candidateMeta {
+  color: var(--text-muted);
+  font-size: var(--font-small);
+  overflow-wrap: anywhere;
+}
+
+.candidateDistance {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+}
+
+.candidateWarn {
+  color: var(--warn-text);
+}
+
+.candidateActions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: var(--sp-2);
+}
+
+.facilitySummary {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-size: var(--font-small);
 }

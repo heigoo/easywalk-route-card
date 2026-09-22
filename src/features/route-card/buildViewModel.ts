@@ -2,7 +2,7 @@
  * domain → CardViewModel（第 10.2 节）。
  * 文本预格式化：单位、“约”、待确认与缺失说明在生成时一次确定，渲染层不再二次拼接。
  */
-import type { Itinerary, Leg } from '../../../shared/contracts/domain';
+import type { Fact, Itinerary, Leg, OpeningWindow, PlaceRef } from '../../../shared/contracts/domain';
 import { activeSequence } from '../../../shared/contracts/domain';
 import type { ConstraintVerdicts, TripStats } from '../../domain/compute';
 import type { CardStatus } from '../../domain/status';
@@ -203,6 +203,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
       const notices: NodeNotice[] = [];
       const placeNotices = collectPlaceNotices(it, node.placeId);
       notices.push(...placeNotices);
+      notices.push(...collectNodeFacilityNotices(it, id));
 
       const nodeBlock: NodeBlock = {
         id: blockId('node'),
@@ -241,6 +242,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
       if (node.seatFact.value !== true) {
         notices.push({ text: '是否有座位待确认', severity: 'info' });
       }
+      notices.push(...collectNodeFacilityNotices(it, id));
       const nodeBlock: NodeBlock = {
         id: blockId('node'),
         kind: 'node',
@@ -376,9 +378,7 @@ function collectPlaceNotices(it: Itinerary, placeId: string): NodeNotice[] {
   const notices: NodeNotice[] = [];
   const place = it.places[placeId];
   if (!place) return notices;
-  if (place.openingSchedule.reviewState === 'reported' && place.openingSchedule.value) {
-    notices.push({ text: '开放时间来自地图描述，未经核对', severity: 'info' });
-  }
+  notices.push(openingNotice(place));
   for (const f of it.facilities) {
     if (f.target.type === 'place' && f.target.placeId === placeId) {
       for (const [key, raw] of Object.entries(f.facts)) {
@@ -393,6 +393,84 @@ function collectPlaceNotices(it: Itinerary, placeId: string): NodeNotice[] {
     }
   }
   return notices;
+}
+
+/**
+ * 节点上记录的设施候选提醒（Task 3 / M-R03）：
+ * 歇脚点措辞必须含“候选”，不暗示有空座位或可免费休息；
+ * 座位/开放未知时保持“待确认”口径（未知不等于没有）。
+ */
+function collectNodeFacilityNotices(it: Itinerary, nodeId: string): NodeNotice[] {
+  const notices: NodeNotice[] = [];
+  for (const f of it.facilities) {
+    if (f.target.type !== 'node' || f.target.nodeId !== nodeId) continue;
+    const facts = f.facts as Record<string, Fact<unknown> | undefined>;
+    const rawName = facts.name?.value;
+    const name = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : null;
+    if (f.kind === 'rest-candidate') {
+      const seat = facts.seat;
+      const checked = seat?.reviewState === 'userChecked';
+      if (!name && !checked) continue;
+      const status = !checked
+        ? '座位待确认'
+        : seat?.value === true
+          ? '你已核对：可坐'
+          : seat?.value === false
+            ? '你已核对：不可坐'
+            : '你已核对';
+      notices.push({
+        text: name ? `歇脚点候选：${name}（${status}）` : `歇脚点候选（${status}）`,
+        severity: 'info',
+      });
+    } else if (f.kind === 'toilet') {
+      const open = facts.open;
+      const checked = open?.reviewState === 'userChecked';
+      if (!name && !checked) continue;
+      const status = !checked ? '待确认' : open?.value ? `你已核对：${String(open.value)}` : '你已核对';
+      notices.push({
+        text: name ? `厕所：${name}（${status}）` : `厕所（${status}）`,
+        severity: 'info',
+      });
+    }
+  }
+  return notices;
+}
+
+/** 窗口数组 → 展示文本（HH:mm-HH:mm；空数组＝当天不开放） */
+function windowsText(windows: OpeningWindow[]): string {
+  if (windows.length === 0) return '当天不开放';
+  return windows.map((w) => `${w.startLocalTime}-${w.endLocalTime}`).join('、');
+}
+
+/**
+ * 开放时间提醒（R-A2）三态文案：
+ * 地图参考（待核对）/ 自动解析自地图文本（请核对）/ 你已核对；
+ * 无值只显示“待确认”，不显示看似完整的开放结论。
+ */
+function openingNotice(place: PlaceRef): NodeNotice {
+  const schedule = place.openingSchedule;
+  const desc = place.openingDescription;
+  if (schedule.value !== null) {
+    const valueText = windowsText(schedule.value.windows);
+    if (schedule.note !== null && schedule.note.includes('自动解析')) {
+      return { text: `开放时间（自动解析自地图文本，请核对）：${valueText}`, severity: 'info' };
+    }
+    if (schedule.reviewState === 'userChecked') {
+      return { text: `开放时间（你已核对）：${valueText}`, severity: 'info' };
+    }
+    if (schedule.sourceType === 'amap' || schedule.reviewState === 'reported') {
+      return { text: `开放时间（地图参考，待核对）：${valueText}`, severity: 'info' };
+    }
+  }
+  if (desc.value !== null) {
+    if (desc.reviewState === 'userChecked') {
+      return { text: `开放时间（你已核对）：${desc.value}`, severity: 'info' };
+    }
+    if (desc.sourceType === 'amap' || desc.reviewState === 'reported') {
+      return { text: `开放时间（地图参考，待核对）：${desc.value}`, severity: 'info' };
+    }
+  }
+  return { text: '开放时间待确认', severity: 'info' };
 }
 
 function buildSourceItems(it: Itinerary): Array<{ labelText: string; valueText: string }> {

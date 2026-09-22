@@ -22,6 +22,7 @@ export interface LoadResult {
 export function toPersisted(it: Itinerary): Itinerary {
   const legs: Record<string, Leg> = {};
   for (const [id, leg] of Object.entries(it.legs)) {
+    // 地图报告属性（如阶梯）不落盘，重载后回到待确认；用户核对结果走 facilityRecord 的 stairs 事实持久化
     if (leg.durationSource === 'amap') {
       // 未采纳的地图值不落盘；重载后回到待获取，失败结论不保留
       legs[id] = {
@@ -36,15 +37,17 @@ export function toPersisted(it: Itinerary): Itinerary {
         adoptedAt: null,
         state: 'missing',
         failureCode: null,
+        reportedFeatures: [],
       };
     } else if (leg.state === 'failed' || leg.state === 'unreachable') {
       legs[id] = {
         ...leg,
         state: 'missing',
         failureCode: null,
+        reportedFeatures: [],
       };
     } else {
-      legs[id] = leg;
+      legs[id] = { ...leg, reportedFeatures: [] };
     }
   }
 
@@ -82,6 +85,35 @@ function revertReportedFact<T>(fact: Fact<T>): Fact<T> {
     };
   }
   return fact;
+}
+
+/** 备份解析结果：invalidJson=不是合法 JSON；unsupported=schemaVersion 未识别；invalidShape=内容不完整 */
+export type ParseBackupResult =
+  | { ok: true; itinerary: Itinerary }
+  | { ok: false; error: 'invalidJson' | 'unsupported' | 'invalidShape' };
+
+/** 导出备份文本：走持久化白名单（未采纳地图值不导出），输出已含 schemaVersion */
+export function serializeItineraryBackup(it: Itinerary): string {
+  return JSON.stringify(toPersisted(it), null, 2);
+}
+
+/** 导入备份文本：任一步失败都拒绝，由调用方保持当前行程不变 */
+export function parseItineraryBackup(text: string): ParseBackupResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: 'invalidJson' };
+  }
+  const version = (parsed as { schemaVersion?: unknown })?.schemaVersion;
+  if (version !== SCHEMA_VERSION) {
+    return { ok: false, error: 'unsupported' };
+  }
+  const result = itinerarySchema.safeParse(parsed);
+  if (!result.success) {
+    return { ok: false, error: 'invalidShape' };
+  }
+  return { ok: true, itinerary: result.data };
 }
 
 export interface ItineraryStore {

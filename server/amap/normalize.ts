@@ -57,6 +57,41 @@ function pickDistrict(poi: Record<string, unknown>): string {
   return toTrimmedString(poi.address);
 }
 
+/** 开放时间参考文本的最大长度（契约约定 200 字符以内） */
+const OPENING_HOURS_MAX_LENGTH = 200;
+
+/**
+ * 提取 poi.business 里的开放时间参考文本（原样文本，不做任何语义解析）：
+ * 取值优先级 opening_hours（string 或 string[]，数组元素 trim 后用'；'连接）→ opentime_week → opentime_today；
+ * 每级 trim 后为空视为缺失，继续尝试下一键；截断到 200 字符以内；完全缺失返回 null。
+ * 只做 trim/截断清洗，绝不解析成结构化时段——这是地图参考文本，待用户核对，不代表此刻开放。
+ */
+function extractOpeningHoursText(poi: Record<string, unknown>): string | null {
+  const business = isObject(poi.business) ? poi.business : null;
+  if (!business) return null;
+  const candidates: unknown[] = [
+    business.opening_hours,
+    business.opentime_week,
+    business.opentime_today,
+  ];
+  for (const candidate of candidates) {
+    let text: string;
+    if (Array.isArray(candidate)) {
+      text = candidate
+        .filter((seg): seg is string => typeof seg === 'string')
+        .map((seg) => seg.trim())
+        .filter((seg) => seg.length > 0)
+        .join('；');
+    } else if (typeof candidate === 'string') {
+      text = candidate.trim();
+    } else {
+      continue; // 非 string/数组视为缺失，尝试下一键
+    }
+    if (text.length > 0) return text.slice(0, OPENING_HOURS_MAX_LENGTH);
+  }
+  return null;
+}
+
 export interface PlacesPage {
   items: PlaceSearchItem[];
   /** 本页满 10 条时给出下一页页码，否则 null（不承诺全量覆盖） */
@@ -66,8 +101,14 @@ export interface PlacesPage {
 /**
  * pois[] → PlaceSearchItem[]（第 7.2/7.5 节）：
  * entranceStatus 无入口证据恒为 'pending'；空 pois 数组是合法空结果。
+ * openingHoursText 统一按 extractOpeningHoursText 提取；
+ * straightLineMeters 由调用方按数据源决定（文本搜索无距离，恒 null）。
  */
-function normalizePois(body: unknown, page: number): NormalizeResult<PlacesPage> {
+function normalizePois(
+  body: unknown,
+  page: number,
+  extractStraightLine: (poi: Record<string, unknown>) => number | null = () => null,
+): NormalizeResult<PlacesPage> {
   const businessError = checkAmapBusinessSuccess(body);
   if (businessError) return { ok: false, error: businessError };
   const pois = (body as Record<string, unknown>).pois;
@@ -86,22 +127,28 @@ function normalizePois(body: unknown, page: number): NormalizeResult<PlacesPage>
       address: toTrimmedString(raw.address),
       location: parseLocation(raw.location),
       entranceStatus: 'pending',
+      openingHoursText: extractOpeningHoursText(raw),
+      straightLineMeters: extractStraightLine(raw),
     });
   }
   return { ok: true, value: { items, nextPage: pois.length === 10 ? page + 1 : null } };
 }
 
-/** 地点文本搜索归一化 */
+/**
+ * 地点文本搜索归一化：文本搜索无距查询中心的距离信息，
+ * straightLineMeters 恒为 null（未知不等于没有，绝不默认 0）。
+ */
 export function normalizeTextSearch(body: unknown, page: number): NormalizeResult<PlacesPage> {
   return normalizePois(body, page);
 }
 
 /**
- * 周边搜索归一化（第 7.5 节）：distance 只是距查询中心的距离，
- * 不能作为步行耗时依据，因此不映射进契约。
+ * 周边搜索归一化（第 7.5 节）：poi.distance 是距查询中心的直线距离，
+ * 用 parseNumericString 解析为 straightLineMeters（非法/缺失→null，绝不当作 0）。
+ * 直线距离仅作候选排序参考，不能作为步行耗时或路程依据（沿用本文件既有的 distance 决策）。
  */
 export function normalizeAround(body: unknown, page: number): NormalizeResult<PlacesPage> {
-  return normalizePois(body, page);
+  return normalizePois(body, page, (poi) => parseNumericString(poi.distance));
 }
 
 /**

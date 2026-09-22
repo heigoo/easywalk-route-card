@@ -231,6 +231,8 @@ export const legSchema = z.object({
   provider: z.string().nullable(),
   state: legStateSchema,
   failureCode: failureCodeSchema.nullable(),
+  /** 地图报告属性（如阶梯），未核实，按持久化白名单不落盘；.default([]) 保证旧数据仍可解析 */
+  reportedFeatures: z.array(z.object({ kind: z.string(), note: z.string() })).default([]),
 });
 /** 路段（第 4.5 节）：以起止逻辑节点身份及坐标版本关联 */
 export type Leg = z.infer<typeof legSchema>;

@@ -19,6 +19,8 @@ export interface MatrixEdgeValue {
   providerApiVersion: string | null;
   fetchedAt: string;
   state: 'ready' | 'unreachable';
+  /** 地图报告属性（如阶梯），未核实，随会话地图值写入 Leg（不落盘）；缺失按空处理 */
+  reportedFeatures?: Array<{ kind: string; note: string }>;
 }
 
 export interface ApplicableCandidate {
@@ -70,6 +72,8 @@ function applySessionEdges(
         fetchedAt: edge.fetchedAt,
         provider: edge.provider,
         providerApiVersion: edge.providerApiVersion,
+        // 不可达边没有可走路线，也就没有地图报告属性
+        reportedFeatures: [],
       };
       continue;
     }
@@ -87,6 +91,7 @@ function applySessionEdges(
       fetchedAt: edge.fetchedAt,
       provider: edge.provider,
       providerApiVersion: edge.providerApiVersion,
+      reportedFeatures: edge.reportedFeatures ?? [],
     };
   }
   return { ...it, legs };

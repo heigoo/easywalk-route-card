@@ -10,8 +10,8 @@
  * - 明确不可达（null）的边不参与组合；未知（缺失）边不按零成本剪枝或排名（第 6.6 节）。
  *
  * 实现备注：到达时刻的“本地秒”按东八区偏移换算后再取日秒（第 6.4.4 节“到达早于开窗则累等待”的语义）。
- * compute.ts 的 computeStats 直接用 epoch % 86400（UTC 日秒）与本地开窗秒比较，
- * 上午时段会得出约 8 小时量级的错误等待；此处为有意修正，最终汇报中标注该偏差。
+ * compute.ts 的 computeStats 同样经 epochToLocalDaySeconds 取东八区本地日秒再与开窗秒比较，
+ * 两个文件的时间口径已统一为本地日秒（Asia/Shanghai），不存在按 UTC 日秒比较的偏差。
  */
 import type { Itinerary, OpeningWindow, VisitNode } from '../../shared/contracts/domain';
 import { activeSequence, MAX_ACTIVITY_NODES, MAX_VISIT_NODES } from '../../shared/contracts/domain';

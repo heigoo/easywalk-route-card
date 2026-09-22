@@ -20,7 +20,7 @@ type View = 'edit' | 'preview';
 
 export function App() {
   const controller = useItinerary();
-  const { itinerary, apply, saveState, saveError, loadError, resetAll } = controller;
+  const { itinerary, apply, replace, saveState, saveError, loadError, resetAll } = controller;
   const { stats, cardStatus, cardViewModel } = useItineraryDerived(itinerary);
   const isWide = useIsWide();
   const [view, setView] = useState<View>('edit');
@@ -123,6 +123,7 @@ export function App() {
         cardStatus={cardStatus}
         onShowPreview={goPreview}
         onDeleteAll={resetAll}
+        onReplaceItinerary={replace}
       />
 
       <section className={styles.p1Section} aria-label="自动规划增强">

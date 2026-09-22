@@ -161,6 +161,40 @@ describe('采纳与离线（第 8.5 节）', () => {
     expect(refetched.legs[legId].effectiveWalkingSeconds).toBe(720); // 未被覆盖
     expect(refetched.legs[legId].durationSource).toBe('adopted');
   });
+
+  it('adoptAllMapLegs 只采纳 amap 路段：manual 与已采纳路段不受影响', () => {
+    const { it, aId } = setup();
+    // 起点→A 为手动填写；A→终点写入地图值
+    const manualLegId = Object.values(it.legs).find((l) => l.fromNodeId === it.origin!.id)!.id;
+    const withAmap = applyMatrixEdges(it, [
+      {
+        fromNodeId: aId,
+        toNodeId: it.destination!.id,
+        fromCoordinateRevision: 0,
+        toCoordinateRevision: 0,
+        distanceMeters: 500,
+        rawWalkingSeconds: 400,
+        provider: 'amap',
+        providerApiVersion: 'v5',
+        fetchedAt: '2026-09-22T01:00:00.000Z',
+        state: 'ready',
+      },
+    ]);
+
+    const { itinerary: adopted, adoptedCount } = adoptAllMapLegs(withAmap, '2026-09-22T02:00:00.000Z');
+    expect(adoptedCount).toBe(1);
+    // manual 路段原样保留
+    expect(adopted.legs[manualLegId]).toEqual(withAmap.legs[manualLegId]);
+    expect(adopted.legs[manualLegId].durationSource).toBe('manual');
+    const adoptedLeg = Object.values(adopted.legs).find((l) => l.fromNodeId === aId)!;
+    expect(adoptedLeg.durationSource).toBe('adopted');
+    expect(adoptedLeg.adoptedAt).toBe('2026-09-22T02:00:00.000Z');
+
+    // 再次执行不重复采纳、不改写既有 adoptedAt
+    const again = adoptAllMapLegs(adopted, '2026-09-22T03:00:00.000Z');
+    expect(again.adoptedCount).toBe(0);
+    expect(again.itinerary.legs[adoptedLeg.id].adoptedAt).toBe('2026-09-22T02:00:00.000Z');
+  });
 });
 
 describe('输入指纹（第 8.2 节）', () => {

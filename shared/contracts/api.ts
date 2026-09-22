@@ -29,6 +29,16 @@ export interface PlaceSearchItem {
   location: { longitude: number; latitude: number } | null;
   /** 无入口证据时恒为待确认 */
   entranceStatus: 'confirmed' | 'pending';
+  /**
+   * 开放时间参考文本（高德 business 原样文本，仅做清洗不做语义解析）。
+   * 地图参考文本，待用户核对，不代表此刻开放；缺失显式为 null（未知不等于没有）。
+   */
+  openingHoursText?: string | null;
+  /**
+   * 距查询中心的直线距离（米）。
+   * 直线距离，仅候选排序参考，禁止作为步行耗时或路程依据；缺失显式为 null（未知不等于没有）。
+   */
+  straightLineMeters?: number | null;
 }
 export const placeSearchItemSchema = z.object({
   id: z.string(),
@@ -37,6 +47,10 @@ export const placeSearchItemSchema = z.object({
   address: z.string(),
   location: coordinateSchema.nullable(),
   entranceStatus: z.enum(['confirmed', 'pending']),
+  /** 地图参考文本，待用户核对，不代表此刻开放 */
+  openingHoursText: z.string().nullable().optional(),
+  /** 直线距离，仅候选排序参考，禁止作为步行耗时或路程依据 */
+  straightLineMeters: z.number().int().nonnegative().nullable().optional(),
 });
 
 export const placesSearchQuerySchema = z.object({

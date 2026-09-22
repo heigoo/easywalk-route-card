@@ -58,6 +58,8 @@ describe('createAmapClient 文本搜索（第 7.5 节）', () => {
       address: '示例路1号',
       location: { longitude: 116.397128, latitude: 39.916527 },
       entranceStatus: 'pending',
+      openingHoursText: null,
+      straightLineMeters: null,
     });
     expect(result.nextPage).toBe(2);
 
@@ -140,6 +142,131 @@ describe('createAmapClient 文本搜索（第 7.5 节）', () => {
     const restUrl = new URL(String(calls[1]));
     expect(restUrl.searchParams.get('keywords')).toBe('休息区');
     expect(restUrl.searchParams.get('page_num')).toBe('2');
+  });
+});
+
+describe('开放时间文本提取（地图参考文本，仅清洗不解析，待用户核对）', () => {
+  it('三键优先级：opening_hours > opentime_week > opentime_today', async () => {
+    const pois = [
+      poi({
+        id: 'A',
+        business: { opening_hours: ' 08:00-17:00 ', opentime_week: '周一至周日', opentime_today: '09:00-18:00' },
+      }),
+      poi({ id: 'B', business: { opentime_week: ' 周一休息 ', opentime_today: '09:00-18:00' } }),
+      poi({ id: 'C', business: { opentime_today: ' 09:00-18:00（节假日除外） ' } }),
+    ];
+    const fetchImpl = asFetchImpl(async () => jsonResponse(searchBody(pois)));
+    const client = createAmapClient({ apiKey: KEY, fetchImpl });
+
+    const result = await client.textSearch({ keyword: '公园', city: '北京市', page: 1 });
+
+    expect(result.items.map((item) => item.openingHoursText)).toEqual([
+      '08:00-17:00',
+      '周一休息',
+      '09:00-18:00（节假日除外）',
+    ]);
+  });
+
+  it('opening_hours 为数组时逐段 trim 后用；连接，空段剔除', async () => {
+    const pois = [
+      poi({ business: { opening_hours: ['周一 08:00-17:00', '  周二 09:00-16:00  ', ''] } }),
+    ];
+    const fetchImpl = asFetchImpl(async () => jsonResponse(searchBody(pois)));
+    const client = createAmapClient({ apiKey: KEY, fetchImpl });
+
+    const result = await client.textSearch({ keyword: '公园', city: '北京市', page: 1 });
+
+    expect(result.items[0].openingHoursText).toBe('周一 08:00-17:00；周二 09:00-16:00');
+  });
+
+  it('超过 200 字符截断到 200 字符以内', async () => {
+    const pois = [poi({ business: { opening_hours: 'x'.repeat(250) } })];
+    const fetchImpl = asFetchImpl(async () => jsonResponse(searchBody(pois)));
+    const client = createAmapClient({ apiKey: KEY, fetchImpl });
+
+    const result = await client.textSearch({ keyword: '公园', city: '北京市', page: 1 });
+
+    expect(result.items[0].openingHoursText).toBe('x'.repeat(200));
+  });
+
+  it('缺失、空白、空数组均视为缺失 → null；空白键跳过后落到下一键', async () => {
+    const pois = [
+      poi({ id: 'A' }), // 无 business
+      poi({ id: 'B', business: {} }), // business 无任何键
+      poi({
+        id: 'C',
+        business: { opening_hours: '   ', opentime_week: '  ', opentime_today: '' },
+      }),
+      poi({ id: 'D', business: 'not-object' }), // business 非对象
+      poi({ id: 'E', business: { opening_hours: [], opentime_week: '仅周末开放' } }),
+      poi({ id: 'F', business: { opening_hours: ['  ', ''], opentime_today: '全天' } }),
+    ];
+    const fetchImpl = asFetchImpl(async () => jsonResponse(searchBody(pois)));
+    const client = createAmapClient({ apiKey: KEY, fetchImpl });
+
+    const result = await client.textSearch({ keyword: '公园', city: '北京市', page: 1 });
+
+    expect(result.items.map((item) => item.openingHoursText)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      '仅周末开放',
+      '全天',
+    ]);
+  });
+});
+
+describe('周边搜索 distance → straightLineMeters（直线距离仅作候选排序参考）', () => {
+  it('数字字符串解析为距查询中心的直线距离（米）', async () => {
+    const pois = [poi({ id: 'A', distance: '350' }), poi({ id: 'B', distance: ' 470 ' })];
+    const fetchImpl = asFetchImpl(async () => jsonResponse(searchBody(pois)));
+    const client = createAmapClient({ apiKey: KEY, fetchImpl });
+
+    const result = await client.around({
+      longitude: 116.39,
+      latitude: 39.91,
+      category: 'TOILET',
+      radiusMeters: 500,
+      page: 1,
+    });
+
+    expect(result.items.map((item) => item.straightLineMeters)).toEqual([350, 470]);
+  });
+
+  it('非法或缺失的 distance → null，绝不当作 0', async () => {
+    const pois = [
+      poi({ id: 'A', distance: 'abc' }),
+      poi({ id: 'B', distance: '' }),
+      poi({ id: 'C', distance: '-5' }),
+      poi({ id: 'D' }), // 缺失
+    ];
+    const fetchImpl = asFetchImpl(async () => jsonResponse(searchBody(pois)));
+    const client = createAmapClient({ apiKey: KEY, fetchImpl });
+
+    const result = await client.around({
+      longitude: 116.39,
+      latitude: 39.91,
+      category: 'REST_CANDIDATE',
+      radiusMeters: 2000,
+      page: 1,
+    });
+
+    expect(result.items.map((item) => item.straightLineMeters)).toEqual([null, null, null, null]);
+    expect(result.items.every((item) => item.straightLineMeters !== 0)).toBe(true);
+  });
+});
+
+describe('文本搜索不提供直线距离（未知不等于没有）', () => {
+  it('文本搜索 straightLineMeters 恒为 null', async () => {
+    const fetchImpl = asFetchImpl(async () =>
+      jsonResponse(searchBody([poi({ distance: '350' })])),
+    );
+    const client = createAmapClient({ apiKey: KEY, fetchImpl });
+
+    const result = await client.textSearch({ keyword: '公园', city: '北京市', page: 1 });
+
+    expect(result.items[0].straightLineMeters).toBeNull();
   });
 });
 

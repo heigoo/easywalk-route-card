@@ -52,7 +52,11 @@ class StubPlannerWorker {
   }
 }
 
-function matrixResponse(edges: Array<{ from: string; to: string; seconds: number }>, partial = false) {
+function matrixResponse(
+  edges: Array<{ from: string; to: string; seconds: number }>,
+  partial = false,
+  reportedFeatures: Array<{ kind: string; note: string }> = [],
+) {
   return {
     requestId: 'mx-1',
     data: {
@@ -67,7 +71,7 @@ function matrixResponse(edges: Array<{ from: string; to: string; seconds: number
         provider: 'amap',
         providerApiVersion: 'v5',
         fetchedAt: '2026-09-22T05:00:00.000Z',
-        reportedFeatures: [],
+        reportedFeatures,
       })),
       failures: [],
       queryCoverage: partial ? ('partial' as const) : ('complete' as const),
@@ -178,5 +182,163 @@ describe('P1 自动规划界面', () => {
     await waitFor(() => expect(screen.queryByText('主要建议')).not.toBeInTheDocument());
     expect(screen.getByRole('article', { name: '示例景点甲' })).toBeInTheDocument();
     expect(screen.getAllByText(/步行约/).length).toBeGreaterThan(0);
+    // 地图未返回阶梯信息：不显示任何“有阶梯/无台阶”结论（未知不等于没有）
+    expect(screen.queryByText(/可能有阶梯/)).not.toBeInTheDocument();
+    expect(screen.queryByText('无台阶')).not.toBeInTheDocument();
+  });
+
+  it('地图报告阶梯时路段行提示并可一键记录台阶核对（R-A3）', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '展开' }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          requestId: 'r',
+          data: {
+            items: [
+              { id: 'p1', name: '示例起点', district: '示例区', address: '示例路1号', location: { longitude: 116.4, latitude: 39.9 }, entranceStatus: 'pending' },
+              { id: 'p2', name: '示例终点', district: '示例区', address: '示例路2号', location: { longitude: 116.42, latitude: 39.93 }, entranceStatus: 'pending' },
+              { id: 'p3', name: '示例景点甲', district: '示例区', address: '示例路3号', location: { longitude: 116.41, latitude: 39.91 }, entranceStatus: 'pending' },
+            ],
+            nextPage: null,
+          },
+          warnings: [],
+        }),
+      })),
+    );
+    await user.type(screen.getByLabelText('地点关键词'), '示例');
+    await user.type(screen.getByLabelText('搜索城市'), '示例市');
+    await user.click(screen.getByRole('button', { name: '搜索地点' }));
+    const items = await screen.findAllByRole('listitem');
+    await within(items[0]).getByRole('button', { name: '设为起点' }).click();
+    await within(items[1]).getByRole('button', { name: '设为终点' }).click();
+    await within(items[2]).getByRole('button', { name: '设为景点' }).click();
+
+    // 补全停留时长，使候选可核验（第 6.4.6 节）
+    const nodeCard = screen.getByRole('article', { name: '示例景点甲' });
+    await user.click(within(nodeCard).getByRole('button', { name: '编辑' }));
+    await user.type(screen.getByLabelText('预计停留（分钟，留空=未知）'), '30');
+    await user.type(screen.getByLabelText('园内预计步行（分钟）'), '8');
+    await user.click(screen.getByRole('button', { name: '确认修改' }));
+
+    // 矩阵边带阶梯报告
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { pairs: Array<{ fromId: string; toId: string }> };
+        return {
+          ok: true,
+          json: async () =>
+            matrixResponse(
+              body.pairs.map((p, i) => ({ from: p.fromId, to: p.toId, seconds: 300 + i * 60 })),
+              false,
+              [{ kind: 'stairs', note: '高德标注阶梯' }],
+            ),
+        };
+      }),
+    );
+    await user.click(screen.getByRole('button', { name: '计算路线' }));
+    await waitFor(() => expect(screen.queryByText('计算中…')).not.toBeInTheDocument());
+    await screen.findByText('主要建议');
+    await user.click(screen.getByRole('button', { name: '应用此方案' }));
+    await waitFor(() => expect(screen.queryByText('主要建议')).not.toBeInTheDocument());
+
+    // 路段行出现阶梯提示；未核对前不下“无台阶”结论
+    expect(screen.getAllByText('高德标注本段可能有阶梯（待核对）').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/无台阶/)).not.toBeInTheDocument();
+
+    // 一键记录台阶核对：打开对话框并预选台阶项
+    await user.click(screen.getAllByRole('button', { name: '记录台阶核对' })[0]);
+    expect(screen.getByLabelText('台阶情况')).toBeInTheDocument();
+    expect(screen.queryByLabelText('厕所开放情况')).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('台阶情况'), 'yes');
+    await user.click(screen.getByRole('button', { name: '确认修改' }));
+
+    // 核对结果已写入 stairs 事实：重新打开按路段回读
+    await user.click(screen.getAllByRole('button', { name: '记录台阶核对' })[0]);
+    expect(screen.getByLabelText('台阶情况')).toHaveValue('yes');
+  });
+
+  it('终点前路段行可编辑并显示阶梯提示（Task 11，R02/R-A3）', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '展开' }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          requestId: 'r',
+          data: {
+            items: [
+              { id: 'p1', name: '示例起点', district: '示例区', address: '示例路1号', location: { longitude: 116.4, latitude: 39.9 }, entranceStatus: 'pending' },
+              { id: 'p2', name: '示例终点', district: '示例区', address: '示例路2号', location: { longitude: 116.42, latitude: 39.93 }, entranceStatus: 'pending' },
+              { id: 'p3', name: '示例景点甲', district: '示例区', address: '示例路3号', location: { longitude: 116.41, latitude: 39.91 }, entranceStatus: 'pending' },
+            ],
+            nextPage: null,
+          },
+          warnings: [],
+        }),
+      })),
+    );
+    await user.type(screen.getByLabelText('地点关键词'), '示例');
+    await user.type(screen.getByLabelText('搜索城市'), '示例市');
+    await user.click(screen.getByRole('button', { name: '搜索地点' }));
+    const items = await screen.findAllByRole('listitem');
+    await within(items[0]).getByRole('button', { name: '设为起点' }).click();
+    await within(items[1]).getByRole('button', { name: '设为终点' }).click();
+    await within(items[2]).getByRole('button', { name: '设为景点' }).click();
+
+    // 补全停留时长，使候选可核验（第 6.4.6 节）
+    const nodeCard = screen.getByRole('article', { name: '示例景点甲' });
+    await user.click(within(nodeCard).getByRole('button', { name: '编辑' }));
+    await user.type(screen.getByLabelText('预计停留（分钟，留空=未知）'), '30');
+    await user.type(screen.getByLabelText('园内预计步行（分钟）'), '8');
+    await user.click(screen.getByRole('button', { name: '确认修改' }));
+
+    // 矩阵边带阶梯报告：构造“起点＋1 景点＋终点”行程（含“最后一站→终点”段）
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { pairs: Array<{ fromId: string; toId: string }> };
+        return {
+          ok: true,
+          json: async () =>
+            matrixResponse(
+              body.pairs.map((p, i) => ({ from: p.fromId, to: p.toId, seconds: 300 + i * 60 })),
+              false,
+              [{ kind: 'stairs', note: '高德标注阶梯' }],
+            ),
+        };
+      }),
+    );
+    await user.click(screen.getByRole('button', { name: '计算路线' }));
+    await waitFor(() => expect(screen.queryByText('计算中…')).not.toBeInTheDocument());
+    await screen.findByText('主要建议');
+    await user.click(screen.getByRole('button', { name: '应用此方案' }));
+    await waitFor(() => expect(screen.queryByText('主要建议')).not.toBeInTheDocument());
+
+    // “最后一站→终点”路段行存在（修复前终点分支漏渲染该行，按钮根本不存在）
+    const legEditBtn = screen.getByRole('button', { name: '编辑路段 示例景点甲 到 示例终点' });
+    // 该段的阶梯提示可见（按路段行定界，不误认其他路段的提示）
+    const legRow = legEditBtn.closest('div')!;
+    expect(within(legRow).getByText('高德标注本段可能有阶梯（待核对）')).toBeInTheDocument();
+
+    // 可点开编辑弹层并填“其中步行”，确认生效
+    await user.click(legEditBtn);
+    expect(screen.getByText('路段：示例景点甲 → 示例终点')).toBeInTheDocument();
+    await user.clear(screen.getByLabelText('其中步行（分钟）'));
+    await user.type(screen.getByLabelText('其中步行（分钟）'), '13');
+    await user.click(screen.getByRole('button', { name: '确认修改' }));
+
+    // 生效验证：路段行更新为手动值；重新打开弹层回读同一数值
+    const updatedBtn = screen.getByRole('button', { name: '编辑路段 示例景点甲 到 示例终点' });
+    expect(within(updatedBtn.closest('div')!).getByText(/步行约 13 分钟/)).toBeInTheDocument();
+    await user.click(updatedBtn);
+    expect(screen.getByLabelText('其中步行（分钟）')).toHaveValue('13');
+    await user.click(screen.getByRole('button', { name: '取消' }));
   });
 });
