@@ -17,6 +17,10 @@ import type { Itinerary, OpeningWindow, VisitNode } from '../../shared/contracts
 import { activeSequence, MAX_ACTIVITY_NODES, MAX_VISIT_NODES } from '../../shared/contracts/domain';
 import { classifyRest } from '../domain/compute';
 import { computeInputFingerprint, stableStringify } from '../domain/fingerprint';
+import {
+  listInsertableRestCandidates,
+  type InsertableRestCandidate,
+} from '../domain/insertRest';
 import type { PlannerCandidate, PlannerInput, PlannerResult } from './planner-types';
 
 /** 与 domain/compute.ts 一致的时间解析口径：行程当前固定东八区（Asia/Shanghai） */
@@ -90,6 +94,17 @@ export function listCandidatePairs(itinerary: Itinerary): Array<{ from: string; 
       }
     }
   }
+  // 可插入歇脚候选：仅挂靠站相邻的有效路段上枚举插入边（有限，避免矩阵爆炸）
+  const seq = activeSequence(itinerary);
+  for (const r of listInsertableRestCandidates(itinerary)) {
+    for (let i = 0; i < seq.length - 1; i++) {
+      const a = seq[i];
+      const b = seq[i + 1];
+      if (a !== r.hostNodeId && b !== r.hostNodeId) continue;
+      push(a, r.virtualId);
+      push(r.virtualId, b);
+    }
+  }
   return pairs;
 }
 
@@ -106,6 +121,10 @@ function placeIdOf(it: Itinerary, id: string): string | null {
   if (it.origin?.id === id) return it.origin.placeId;
   if (it.destination?.id === id) return it.destination.placeId;
   return it.nodes[id]?.placeId ?? null;
+}
+
+function virtualRestOf(id: string, inserts: Map<string, InsertableRestCandidate>): InsertableRestCandidate | null {
+  return inserts.get(id) ?? null;
 }
 
 /** 同一已确认入口的相邻节点为零衔接边（第 7.2 节，与 rebuildLegs 口径一致） */
@@ -129,9 +148,15 @@ function resolveEdge(
   return { kind: 'unknown' };
 }
 
-function displayName(it: Itinerary, id: string): string {
+function displayName(
+  it: Itinerary,
+  id: string,
+  inserts: Map<string, InsertableRestCandidate> = new Map(),
+): string {
   if (it.origin?.id === id) return '起点';
   if (it.destination?.id === id) return '终点';
+  const virtual = virtualRestOf(id, inserts);
+  if (virtual) return virtual.name;
   const node = it.nodes[id];
   if (!node) return id;
   return it.places[node.placeId]?.name ?? id;
@@ -227,6 +252,7 @@ function simulate(
   it: Itinerary,
   edges: Record<string, number | null>,
   path: string[],
+  inserts: Map<string, InsertableRestCandidate> = new Map(),
 ): SimulateOutcome {
   const cons = it.constraints;
   const unknownFields: string[] = [];
@@ -293,12 +319,22 @@ function simulate(
       const res = resolveEdge(it, edges, from, id);
       if (res.kind !== 'known') {
         durationIncomplete = true;
-        addWalk(null, `路段 ${displayName(it, from)}→${displayName(it, id)} 步行时间待补充`);
+        addWalk(null, `路段 ${displayName(it, from, inserts)}→${displayName(it, id, inserts)} 步行时间待补充`);
       } else {
         elapsed += res.seconds;
         addWalk(res.seconds);
       }
       if (definiteViolation()) return PRUNNED_OUTCOME;
+    }
+
+    const virtual = virtualRestOf(id, inserts);
+    if (virtual) {
+      // 已确认可坐的歇脚候选插入点：时长不编造；可坐→切分连续步行（possibleRest）
+      durationIncomplete = true;
+      addUnknown(`${virtual.name} 休息时长待补充`);
+      closeInterval(true);
+      if (definiteViolation()) return PRUNNED_OUTCOME;
+      continue;
     }
 
     const node = it.nodes[id];
@@ -320,7 +356,7 @@ function simulate(
       }
       if (node.visitSeconds === null) {
         durationIncomplete = true;
-        addUnknown(`${displayName(it, id)} 停留时长待补充`);
+        addUnknown(`${displayName(it, id, inserts)} 停留时长待补充`);
       } else {
         elapsed += node.visitSeconds;
       }
@@ -331,7 +367,7 @@ function simulate(
         } else {
           addWalk(
             ev.walkSeconds,
-            ev.walkSeconds === null ? `${displayName(it, id)} 园内步行待补充` : undefined,
+            ev.walkSeconds === null ? `${displayName(it, id, inserts)} 园内步行待补充` : undefined,
           );
         }
       }
@@ -393,6 +429,10 @@ function simulate(
 // ---------------------------------------------------------------------------
 // 第 6.4.1～6.4.2 节：候选枚举
 // ---------------------------------------------------------------------------
+
+function consContinuousSet(it: Itinerary): boolean {
+  return it.constraints.maxContinuousWalkSeconds !== null;
+}
 
 /** 确定性全排列生成：按输入顺序递归选取 */
 function* permutations(items: string[]): Generator<string[]> {
@@ -462,20 +502,17 @@ export function plan(input: PlannerInput, options: PlanOptions = {}): PlannerRes
   let ordinal = 0;
   const unreachablePairs: string[] = [];
   let unknownEdgeSeen = false;
+  const insertables = listInsertableRestCandidates(it);
+  const insertMap = new Map(insertables.map((r) => [r.virtualId, r] as const));
 
-  const finalize = (path: string[]): void => {
+  const collectPath = (path: string[], sim: SimulateOutcome, insertedRests?: PlannerCandidate['insertedRests']): void => {
     const keptVisits = path.filter((id) => it.nodes[id]?.kind === 'visit');
-    // 第 6.2.3 节：无必去且全部可选时，最终至少保留一个景点
-    if (!hasRequired && keptVisits.length === 0) return;
-    enumerated += 1;
-
     const adoptedLegKeys: string[] = [];
     for (let i = 0; i < path.length - 1; i++) {
       const from = path[i];
       const to = path[i + 1];
       const res = resolveEdge(it, edges, from, to);
       if (res.kind === 'unreachable') {
-        // 第 6.6 节：明确不可达的边不参与可行路线组合
         const key = `${from}|${to}`;
         if (!unreachablePairs.includes(key)) unreachablePairs.push(key);
         return;
@@ -483,16 +520,9 @@ export function plan(input: PlannerInput, options: PlanOptions = {}): PlannerRes
       if (res.kind === 'known') {
         adoptedLegKeys.push(`${from}|${to}`);
       } else {
-        unknownEdgeSeen = true; // 未查询/失败不等于不可达
+        unknownEdgeSeen = true;
       }
     }
-
-    const sim = simulate(it, edges, path);
-    if (sim.pruned) {
-      pruned += 1; // 第 6.4.5 节：已知违反硬限的分支立即剪枝并计数
-      return;
-    }
-
     const candidate: PlannerCandidate = {
       nodeOrder: path,
       adoptedLegKeys,
@@ -504,8 +534,60 @@ export function plan(input: PlannerInput, options: PlanOptions = {}): PlannerRes
       violations: sim.violations,
       unknownFields: sim.unknownFields,
       verifiable: sim.unknownFields.length === 0,
+      ...(insertedRests && insertedRests.length > 0 ? { insertedRests } : {}),
     };
     collected.push({ candidate, ordinal: ordinal++ });
+  };
+
+  /** 连续步行超限（或已知硬限剪枝）时，有限枚举在挂靠站相邻边上插入已确认坐位的歇脚候选 */
+  const tryInsertRests = (path: string[]): void => {
+    if (insertables.length === 0) return;
+    for (const r of insertables) {
+      for (let i = 0; i < path.length - 1; i++) {
+        const a = path[i];
+        const b = path[i + 1];
+        if (a !== r.hostNodeId && b !== r.hostNodeId) continue;
+        const variant = [...path.slice(0, i + 1), r.virtualId, ...path.slice(i + 1)];
+        const keptVisits = variant.filter((id) => it.nodes[id]?.kind === 'visit');
+        if (!hasRequired && keptVisits.length === 0) continue;
+        if (variant.length > MAX_ACTIVITY_NODES) {
+          // 插入后超上限：不静默丢点，也不生成不可应用候选；由主文案提示拆分
+          continue;
+        }
+        const sim2 = simulate(it, edges, variant, insertMap);
+        if (sim2.pruned) continue;
+        enumerated += 1;
+        collectPath(variant, sim2, [
+          { virtualId: r.virtualId, facilityId: r.facilityId, afterNodeId: a },
+        ]);
+      }
+    }
+  };
+
+  const finalize = (path: string[]): void => {
+    const keptVisits = path.filter((id) => it.nodes[id]?.kind === 'visit');
+    // 第 6.2.3 节：无必去且全部可选时，最终至少保留一个景点
+    if (!hasRequired && keptVisits.length === 0) return;
+    enumerated += 1;
+
+    const sim = simulate(it, edges, path, insertMap);
+    if (sim.pruned) {
+      pruned += 1; // 第 6.4.5 节：已知违反硬限的分支立即剪枝并计数
+      // 连续步行导致的剪枝仍可尝试插入休息点（产品缺口补救，不宣称全局最优）
+      if (consContinuousSet(it)) tryInsertRests(path);
+      return;
+    }
+
+    collectPath(path, sim);
+    if (
+      sim.violations.some((v) => v.includes('连续步行')) ||
+      (it.constraints.maxContinuousWalkSeconds !== null &&
+        (sim.longestContinuousWalkSeconds !== null
+          ? sim.longestContinuousWalkSeconds > it.constraints.maxContinuousWalkSeconds
+          : sim.longestContinuousWalkKnownSeconds > it.constraints.maxContinuousWalkSeconds))
+    ) {
+      tryInsertRests(path);
+    }
   };
 
   /** 第 6.4.1～6.4.2 节：枚举区间内可选景点子集 → 枚举顺序并连接固定锚点 */
@@ -592,7 +674,7 @@ export function plan(input: PlannerInput, options: PlanOptions = {}): PlannerRes
     const listed = unreachablePairs
       .map((key) => {
         const [from, to] = key.split('|');
-        return `${displayName(it, from)}→${displayName(it, to)}`;
+        return `${displayName(it, from, insertMap)}→${displayName(it, to, insertMap)}`;
       })
       .join('、');
     conflicts.push(`以下路段明确不可达，相关组合已排除：${listed}`);
@@ -605,9 +687,20 @@ export function plan(input: PlannerInput, options: PlanOptions = {}): PlannerRes
       // 数据缺失无法排除潜在方案：不给“所有方案均不可行”的确定结论
       conflicts.push('搜索数据不完整，无法确定是否存在满足硬性限制的方案');
     } else if (candidates.length === 0) {
-      conflicts.push('在已知数据下没有找到可行路线组合');
+      if (insertables.length > 0) {
+        conflicts.push(
+          '在已知数据下没有找到可行路线组合；已枚举可插入的已确认歇脚点仍不可行，请调整休息安排或手动插入休息点，而不是只减少景点',
+        );
+      } else {
+        conflicts.push(
+          '在已知数据下没有找到可行路线组合；连续步行可能超限，可调整休息安排或手动插入休息点（当前没有已确认可坐且有坐标的歇脚候选）',
+        );
+      }
     } else {
       conflicts.push('已知数据下的完整候选均违反硬性限制');
+      if (insertables.length === 0) {
+        conflicts.push('若因连续步行超限，可手动插入休息点或补充已确认可坐的歇脚候选，而不是只少去一个可选景点');
+      }
     }
   }
 

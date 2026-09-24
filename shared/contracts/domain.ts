@@ -185,6 +185,8 @@ export const facilityRecordSchema = z.object({
   placeId: z.string().nullable(),
   target: facilityTargetSchema,
   facts: z.record(z.string(), z.unknown()),
+  /** 同站多条候选的区分键（地图候选 POI id）；手动/旧数据为 null 或缺省 */
+  recordKey: z.string().nullable().optional(),
 });
 export type FacilityRecord = z.infer<typeof facilityRecordSchema>;
 

@@ -39,6 +39,11 @@ export interface PlannerCandidate {
   unknownFields: string[];
   /** 可核验＝全部输入已知且无未知字段（第 6.4.6 节） */
   verifiable: boolean;
+  /**
+   * 应用时需物化的歇脚候选插入（连续步行超限的有限补救）。
+   * virtualId 对应 nodeOrder 中的 rest-cand:{facilityId}；afterNodeId 为插入锚点。
+   */
+  insertedRests?: Array<{ virtualId: string; facilityId: string; afterNodeId: string }>;
 }
 
 /** 搜索空间统计（第 6.3、6.4.5 节） */

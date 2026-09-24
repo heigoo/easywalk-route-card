@@ -6,13 +6,16 @@
  */
 import { useEffect, useState } from 'react';
 import type {
+  ActivityPlan,
   Fact,
   OpeningSchedule,
   OpeningWindow,
   PlaceRef,
   RouteNode,
+  VisitActivity,
 } from '../../../shared/contracts/domain';
 import { unknownFact } from '../../../shared/contracts/domain';
+import { newId } from '../../domain/id';
 import { Dialog } from '../../components/Dialog';
 import { parseMinutesInput } from '../../components/fields';
 import { formatShanghaiDateTime } from '../../domain/format';
@@ -83,6 +86,11 @@ export function NodeEditDialog({
   /** “写入并标记核对”暂存（局部草稿）：确认修改时才提交 */
   const [mapConfirmed, setMapConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 园内分段（timeline）：默认合计模式，不强迫每人填时间轴 */
+  const [useTimeline, setUseTimeline] = useState(false);
+  const [timelineItems, setTimelineItems] = useState<
+    Array<{ id: string; kind: 'walk' | 'rest'; minutes: string; seat: 'unknown' | 'yes' | 'no' }>
+  >([]);
 
   useEffect(() => {
     if (!open || !node) return;
@@ -114,6 +122,25 @@ export function NodeEditDialog({
       setStayText(node.visitSeconds === null ? '' : String(node.visitSeconds / 60));
       setInsideText(node.insideWalkSeconds === null ? '' : String(node.insideWalkSeconds / 60));
       setRequired(node.required);
+      const plan = node.activityPlan;
+      setUseTimeline(plan?.mode === 'timeline');
+      setTimelineItems(
+        plan?.mode === 'timeline'
+          ? plan.items.map((item) => ({
+              id: item.id,
+              kind: item.kind === 'rest' ? ('rest' as const) : ('walk' as const),
+              minutes: item.durationSeconds === null ? '' : String(item.durationSeconds / 60),
+              seat:
+                item.kind === 'rest'
+                  ? item.seatFact.value === true
+                    ? ('yes' as const)
+                    : item.seatFact.value === false
+                      ? ('no' as const)
+                      : ('unknown' as const)
+                  : ('unknown' as const),
+            }))
+          : [],
+      );
     } else {
       setRestText(node.restSeconds === null ? '' : String(node.restSeconds / 60));
       setSeat(node.seatFact.value === true ? 'yes' : node.seatFact.value === false ? 'no' : 'unknown');
@@ -243,11 +270,52 @@ export function NodeEditDialog({
       if (stay.seconds !== null && inside.seconds !== null && inside.seconds > stay.seconds) {
         return setError('园内步行不能大于停留时长');
       }
+      let activityPlan: ActivityPlan | null = null;
+      if (useTimeline) {
+        const items: VisitActivity[] = [];
+        for (const row of timelineItems) {
+          const m = parseMinutesInput(row.minutes);
+          if (!m.ok) return setError('园内分段时长：' + m.error);
+          if (m.seconds === null) return setError('园内分段时长：请填写分钟数');
+          items.push(
+            row.kind === 'rest'
+              ? {
+                  id: row.id,
+                  kind: 'rest',
+                  durationSeconds: m.seconds,
+                  seatFact: {
+                    value: row.seat === 'yes' ? true : row.seat === 'no' ? false : null,
+                    sourceType: 'user',
+                    sourceName: null,
+                    sourceReference: null,
+                    fetchedAt: null,
+                    reviewState: 'userChecked',
+                    checkedAt: row.seat === 'unknown' ? null : now,
+                    applicableDate: null,
+                    note: null,
+                  },
+                }
+              : {
+                  id: row.id,
+                  kind: 'walk',
+                  durationSeconds: m.seconds,
+                  seatFact: unknownFact<boolean>(),
+                },
+          );
+        }
+        if (items.length === 0) return setError('园内分段：请至少添加一段，或改回合计模式');
+        activityPlan = {
+          mode: 'timeline',
+          completeness: items.every((i) => i.durationSeconds !== null) ? 'complete' : 'incomplete',
+          items,
+        };
+      }
       onSave({
         name: trimmed,
         entranceConfirmed,
         visitSeconds: stay.seconds,
         insideWalkSeconds: inside.seconds,
+        activityPlan,
         required,
         notes: notes.trim(),
         ...(Object.keys(placePatch).length > 0 ? { placePatch } : {}),
@@ -309,6 +377,99 @@ export function NodeEditDialog({
             <label htmlFor="node-inside">园内预计步行（分钟）</label>
             <input id="node-inside" inputMode="numeric" value={insideText} onChange={(e) => setInsideText(e.target.value)} placeholder="未知" />
           </div>
+          <div className={editor.field}>
+            <label htmlFor="node-timeline" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', minHeight: 44 }}>
+              <input
+                id="node-timeline"
+                type="checkbox"
+                checked={useTimeline}
+                onChange={(e) => setUseTimeline(e.target.checked)}
+              />
+              园内分段记录（步行/坐休交错，用于连续步行分界）
+            </label>
+            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-small)' }}>
+              默认用合计；分段可选。分段后按“走一截、坐一截”切分最长连续步行。
+            </span>
+          </div>
+          {useTimeline ? (
+            <div className={editor.candidateBox}>
+              <span className={editor.boxTitle}>园内分段（按顺序）</span>
+              {timelineItems.map((row, idx) => (
+                <div key={row.id} style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select
+                    aria-label={`第 ${idx + 1} 段类型`}
+                    value={row.kind}
+                    onChange={(e) =>
+                      setTimelineItems((items) =>
+                        items.map((x, i) =>
+                          i === idx ? { ...x, kind: e.target.value as 'walk' | 'rest' } : x,
+                        ),
+                      )
+                    }
+                  >
+                    <option value="walk">步行</option>
+                    <option value="rest">坐休</option>
+                  </select>
+                  <input
+                    aria-label={`第 ${idx + 1} 段分钟`}
+                    inputMode="numeric"
+                    style={{ width: '5em' }}
+                    value={row.minutes}
+                    onChange={(e) =>
+                      setTimelineItems((items) =>
+                        items.map((x, i) => (i === idx ? { ...x, minutes: e.target.value } : x)),
+                      )
+                    }
+                    placeholder="分钟"
+                  />
+                  {row.kind === 'rest' ? (
+                    <select
+                      aria-label={`第 ${idx + 1} 段座位`}
+                      value={row.seat}
+                      onChange={(e) =>
+                        setTimelineItems((items) =>
+                          items.map((x, i) =>
+                            i === idx ? { ...x, seat: e.target.value as 'unknown' | 'yes' | 'no' } : x,
+                          ),
+                        )
+                      }
+                    >
+                      <option value="unknown">座位待确认</option>
+                      <option value="yes">可坐</option>
+                      <option value="no">不可坐</option>
+                    </select>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={`${editor.btn} ${editor.small}`}
+                    onClick={() => setTimelineItems((items) => items.filter((_, i) => i !== idx))}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className={`${editor.btn} ${editor.small}`}
+                  onClick={() =>
+                    setTimelineItems((items) => [...items, { id: newId(), kind: 'walk', minutes: '', seat: 'unknown' }])
+                  }
+                >
+                  加步行段
+                </button>
+                <button
+                  type="button"
+                  className={`${editor.btn} ${editor.small}`}
+                  onClick={() =>
+                    setTimelineItems((items) => [...items, { id: newId(), kind: 'rest', minutes: '', seat: 'unknown' }])
+                  }
+                >
+                  加坐休段
+                </button>
+              </div>
+            </div>
+          ) : null}
         </>
       ) : (
         <>

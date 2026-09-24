@@ -346,7 +346,7 @@ describe('附近设施候选流程', () => {
     await user.click(screen.getByRole('button', { name: '确认修改' }));
 
     // 节点卡设施摘要（名称＋属性状态），入口仍在
-    expect(await screen.findByText('厕所：公园东门厕所（你已核对：8:00-18:00）')).toBeInTheDocument();
+    expect(await screen.findByText('厕所候选：公园东门厕所（你已核对：8:00-18:00）')).toBeInTheDocument();
     expect(screen.getByText('歇脚点候选：长椅休息区（你已核对：可坐）')).toBeInTheDocument();
     expect(within(card).getByRole('button', { name: '设施备注' })).toBeInTheDocument();
 

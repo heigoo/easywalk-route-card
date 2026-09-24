@@ -165,29 +165,33 @@ function factCoordinate(value: unknown): { longitude: number; latitude: number }
 }
 
 /**
- * 候选一键转休息点（Task 3 / R-B）：
- * - 仅处理 kind='rest-candidate' 的设施记录，其余原样返回（与既有编辑函数同风格，不抛错）；
- * - 新建地点：名称取候选 name 事实（缺失→“未命名歇脚点”），坐标取候选 location 事实（缺失→null），
+ * 设施候选一键加入路线（Task 3 / R-B；R03 厕所/休息点绕行必须计入）：
+ * - 处理 kind='rest-candidate' | 'toilet' 的设施记录，其余原样返回（与既有编辑函数同风格，不抛错）；
+ * - 新建地点：名称取候选 name 事实（缺失→“未命名歇脚点”/“未命名厕所”），坐标取候选 location 事实（缺失→null），
  *   入口未确认、开放事实走 unknownFact（未知不等于没有）；
  * - 新 rest 节点的 seatFact 整份迁移自候选 seat 事实（来源/核对字段原样保留；无 seat 事实→unknownFact）；
+ * - 厕所候选的 open 事实随迁到新节点的 toilet 设施记录，不丢开放核对；
  * - 新节点插入 nodeOrder 中 afterNodeId 之后并移除原候选记录，随后 rebuildLegs：
- *   受影响的新路段回到待补充，不沿用旧时间。
+ *   受影响的新路段回到待补充，不沿用旧时间。绕行两段进入既有汇总与歇脚绕行对照。
  */
-export function convertRestCandidateToRestNode(
+export function convertFacilityCandidateToRestNode(
   it: Itinerary,
   facilityId: string,
   afterNodeId: string,
   now: string = new Date().toISOString(),
 ): { itinerary: Itinerary; nodeId: string | null } {
   const record = it.facilities.find((f) => f.id === facilityId);
-  if (!record || record.kind !== 'rest-candidate') return { itinerary: it, nodeId: null };
+  if (!record || (record.kind !== 'rest-candidate' && record.kind !== 'toilet')) {
+    return { itinerary: it, nodeId: null };
+  }
   const facts = record.facts as Record<string, Fact<unknown> | undefined>;
 
   const rawName = facts.name?.value;
-  const name = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : '未命名歇脚点';
+  const fallbackName = record.kind === 'toilet' ? '未命名厕所' : '未命名歇脚点';
+  const name = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : fallbackName;
   const place: PlaceRef = { ...createPlace(name), location: factCoordinate(facts.location?.value) };
 
-  // 座位事实整份迁移：不重建、不覆盖来源与核对字段
+  // 座位事实整份迁移：不重建、不覆盖来源与核对字段；厕所无 seat 事实时保持未知（未知≠不可坐）
   const seatFact = (facts.seat as RestNode['seatFact'] | undefined) ?? unknownFact<boolean>();
   const node: RestNode = {
     kind: 'rest',
@@ -205,6 +209,20 @@ export function convertRestCandidateToRestNode(
   else if (it.origin?.id === afterNodeId) nodeOrder.unshift(node.id);
   else nodeOrder.push(node.id);
 
+  // 厕所开放事实随迁到新节点设施；歇脚候选记录移除后不再保留（座位已在 seatFact）
+  let facilities = it.facilities.filter((f) => f.id !== facilityId);
+  if (record.kind === 'toilet' && facts.open) {
+    const toiletRec: FacilityRecord = {
+      id: newId(),
+      kind: 'toilet',
+      placeId: place.id,
+      target: { type: 'node', nodeId: node.id },
+      facts: { open: facts.open },
+      recordKey: record.recordKey ?? null,
+    };
+    facilities = [...facilities, toiletRec];
+  }
+
   const next = rebuildLegs(
     touch(
       {
@@ -212,12 +230,22 @@ export function convertRestCandidateToRestNode(
         places: { ...it.places, [place.id]: place },
         nodes: { ...it.nodes, [node.id]: node },
         nodeOrder,
-        facilities: it.facilities.filter((f) => f.id !== facilityId),
+        facilities,
       },
       now,
     ),
   );
   return { itinerary: next, nodeId: node.id };
+}
+
+/** 兼容名：歇脚候选转休息点（实现已统一走 convertFacilityCandidateToRestNode） */
+export function convertRestCandidateToRestNode(
+  it: Itinerary,
+  facilityId: string,
+  afterNodeId: string,
+  now: string = new Date().toISOString(),
+): { itinerary: Itinerary; nodeId: string | null } {
+  return convertFacilityCandidateToRestNode(it, facilityId, afterNodeId, now);
 }
 
 export function updateNode(it: Itinerary, nodeId: string, patch: Partial<RouteNode>): Itinerary {
@@ -668,16 +696,25 @@ export function upsertFacilityFact(
   return touch({ ...it, facilities });
 }
 
-/** 确保 target（place / node / leg）上存在指定种类的设施记录，并写入一个事实（第 4.4 节） */
+/**
+ * 确保 target（place / node / leg）上存在指定种类的设施记录，并写入一个事实（第 4.4 节）。
+ * recordKey：地图候选 POI id。同站可有多条同类候选，按 recordKey 区分，不再 kind 唯一覆盖；
+ * 缺省 null 表示手动记录（同 target+kind 合并进同一条）。
+ */
 export function upsertFacilityFactForTarget(
   it: Itinerary,
   target: FacilityTarget,
   kind: FacilityKind,
   factKey: string,
   fact: Fact<unknown>,
+  recordKey?: string | null,
 ): Itinerary {
+  const key = recordKey ?? null;
   const existing = it.facilities.find(
-    (f) => f.kind === kind && isSameFacilityTarget(f.target, target),
+    (f) =>
+      f.kind === kind &&
+      isSameFacilityTarget(f.target, target) &&
+      (f.recordKey ?? null) === key,
   );
   if (existing) return upsertFacilityFact(it, existing.id, factKey, fact);
   const record: FacilityRecord = {
@@ -686,6 +723,7 @@ export function upsertFacilityFactForTarget(
     placeId: placeIdOfFacilityTarget(it, target),
     target,
     facts: { [factKey]: fact },
+    recordKey: key,
   };
   return touch({ ...it, facilities: [...it.facilities, record] });
 }
@@ -712,8 +750,9 @@ export function upsertNodeFacilityFact(
   kind: 'toilet' | 'rest-candidate' | 'stairs',
   factKey: string,
   fact: Fact<unknown>,
+  recordKey?: string | null,
 ): Itinerary {
-  return upsertFacilityFactForTarget(it, { type: 'node', nodeId }, kind, factKey, fact);
+  return upsertFacilityFactForTarget(it, { type: 'node', nodeId }, kind, factKey, fact, recordKey);
 }
 
 /** 跳站后是否存在“待补充/待获取”的路段（编辑区提示用） */

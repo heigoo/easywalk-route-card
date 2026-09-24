@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Itinerary } from '../../../shared/contracts/domain';
 import { activeSequence } from '../../../shared/contracts/domain';
 import { computeInputFingerprint } from '../../domain/fingerprint';
+import { listInsertableRestCandidates } from '../../domain/insertRest';
 import { applyPlannerCandidate, edgeKey, type MatrixEdgeValue } from '../../domain/planning';
 import { ApiRequestError, fetchWalkingMatrix, type MatrixNodeInput } from '../../services/api';
 import { createPlannerClient, type PlannerCandidate, type PlannerResult } from '../../workers';
@@ -99,6 +100,16 @@ export function usePlanning(
         longitude: place.location.longitude,
         latitude: place.location.latitude,
         coordinateRevision: place.coordinateRevision,
+      });
+    }
+    // 可插入歇脚候选（虚拟节点）：连续步行超限时有限枚举插入，需一并取路段时间
+    for (const r of listInsertableRestCandidates(itinerary)) {
+      nodes.push({
+        id: r.virtualId,
+        placeId: r.facilityId,
+        longitude: r.location.longitude,
+        latitude: r.location.latitude,
+        coordinateRevision: 0,
       });
     }
     const pairs = listCandidatePairs(itinerary)

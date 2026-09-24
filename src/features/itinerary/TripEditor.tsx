@@ -12,7 +12,7 @@ import {
   addVisitNode,
   adoptAllMapLegs,
   confirmEntrance,
-  convertRestCandidateToRestNode,
+  convertFacilityCandidateToRestNode,
   createPlace,
   moveNode,
   removeNode,
@@ -26,8 +26,10 @@ import {
   upsertFacilityFactForTarget,
   upsertPlace,
 } from '../../domain/itinerary';
+import { hasPendingLegs } from '../../domain/itinerary';
 import { ceilMinutes } from '../../domain/format';
 import { detourNoticeFor, useDetourCompare } from '../planning/useDetourCompare';
+import { useMissingLegs } from '../planning/useMissingLegs';
 import { parseItineraryBackup, serializeItineraryBackup } from '../../storage/local';
 import { TextField } from '../../components/fields';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
@@ -91,11 +93,13 @@ export function TripEditor({
   const [pendingImport, setPendingImport] = useState<Itinerary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   /** 候选转休息点后的持久提示（Task 3 / R-B）：不是一闪而过的 Toast */
-  const [convertHint, setConvertHint] = useState<{ locationMissing: boolean } | null>(null);
+  const [convertHint, setConvertHint] = useState<{ locationMissing: boolean; kind: 'rest' | 'toilet' } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   // 歇脚绕行对照（Task 4 / R-D）：结果仅会话内，不写行程、不落盘
   const detour = useDetourCompare(it);
+  // 跳站/重排/转候选后自动补全新缺失路段（R07 V1.1）
+  const missingLegs = useMissingLegs(it, apply);
 
   const seq = useMemo(() => activeSequence(it), [it]);
   const activeVisits = seq.filter((id) => it.nodes[id]?.kind === 'visit');
@@ -168,15 +172,19 @@ export function TripEditor({
   };
 
   /**
-   * 歇脚点候选一键转休息点（Task 3 / R-B）：
+   * 设施候选一键加入路线（歇脚→休息点 / 厕所→途经点，R03/R-B）：
    * 提示只依赖转换前可知的信息（新节点是否带坐标），不从状态更新器里捕获新 id。
    */
-  const convertRestCandidate = (facilityId: string, afterNodeId: string) => {
-    const preview = convertRestCandidateToRestNode(it, facilityId, afterNodeId);
+  const convertFacilityCandidate = (facilityId: string, afterNodeId: string) => {
+    const preview = convertFacilityCandidateToRestNode(it, facilityId, afterNodeId);
     const created = preview.nodeId ? preview.itinerary.nodes[preview.nodeId] : null;
     const place = created ? preview.itinerary.places[created.placeId] : null;
-    setConvertHint({ locationMissing: place ? place.location === null : true });
-    apply((prev) => convertRestCandidateToRestNode(prev, facilityId, afterNodeId).itinerary);
+    const sourceKind = it.facilities.find((f) => f.id === facilityId)?.kind;
+    setConvertHint({
+      locationMissing: place ? place.location === null : true,
+      kind: sourceKind === 'toilet' ? 'toilet' : 'rest',
+    });
+    apply((prev) => convertFacilityCandidateToRestNode(prev, facilityId, afterNodeId).itinerary);
   };
 
   /** 休息点行的歇脚绕行对比（Task 4 / R-D）；对照不可得一律“绕行对比待补充” */
@@ -326,11 +334,36 @@ export function TripEditor({
 
       {convertHint ? (
         <div className={`${styles.reminder} ${styles.info}`} role="note">
-          <span>已加入路线，请补充新路段步行时间</span>
+          <span>
+            {convertHint.kind === 'toilet' ? '厕所已加入路线，绕行步行会计入总量' : '已加入路线'}
+            ，请补充新路段步行时间
+          </span>
           {convertHint.locationMissing ? <span>位置待确认，暂不能自动获取步行数据</span> : null}
           <button type="button" className={`${styles.btn} ${styles.small}`} onClick={() => setConvertHint(null)}>
             知道了
           </button>
+        </div>
+      ) : null}
+
+      {hasPendingLegs(it) || missingLegs.busy || missingLegs.error ? (
+        <div
+          className={`${styles.reminder} ${missingLegs.error ? styles.warning : styles.info}`}
+          role="note"
+          aria-live="polite"
+        >
+          <span>
+            {missingLegs.busy
+              ? '正在补全新路段步行数据…'
+              : missingLegs.pendingCount > 0
+                ? `有 ${missingLegs.pendingCount} 段步行时间待补充${missingLegs.missingPlaceNames.length > 0 ? `（${missingLegs.missingPlaceNames.join('、')}缺坐标）` : ''}`
+                : '路段步行数据待补充'}
+            {missingLegs.error ? ` ${missingLegs.error.message}` : ''}
+          </span>
+          {!missingLegs.busy && missingLegs.fetchableCount > 0 ? (
+            <button type="button" className={`${styles.btn} ${styles.small}`} onClick={missingLegs.refetch}>
+              补全步行数据
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -386,7 +419,8 @@ export function TripEditor({
                 node={node}
                 place={it.places[node.placeId]}
                 facilities={it.facilities.filter((f) => f.target.type === 'node' && f.target.nodeId === id)}
-                onConvertRestCandidate={(facilityId) => convertRestCandidate(facilityId, id)}
+                onConvertRestCandidate={(facilityId) => convertFacilityCandidate(facilityId, id)}
+                onConvertToiletCandidate={(facilityId) => convertFacilityCandidate(facilityId, id)}
                 index={node.kind === 'visit' ? (visitIndex.get(id) ?? null) : null}
                 isFirst={idx === (it.origin ? 1 : 0)}
                 isLast={idx === seq.length - (it.destination ? 2 : 1)}
@@ -519,7 +553,9 @@ export function TripEditor({
           setFacilityNodeId(null);
           setFacilityLegId(null);
         }}
-        onSave={(target, kind, key, fact) => apply((p) => upsertFacilityFactForTarget(p, target, kind, key, fact))}
+        onSave={(target, kind, key, fact, recordKey) =>
+          apply((p) => upsertFacilityFactForTarget(p, target, kind, key, fact, recordKey))
+        }
       />
 
       <ConfirmDialog

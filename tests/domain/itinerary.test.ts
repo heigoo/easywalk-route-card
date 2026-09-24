@@ -340,18 +340,51 @@ describe('歇脚点候选一键转休息点（Task 3 / R-B）', () => {
     expect(place2.location).toEqual({ longitude: 116.401, latitude: 39.911 });
   });
 
-  it('非 rest-candidate 设施记录或不存在的记录：不转换，行程原样返回', () => {
+  it('厕所候选可加入路线并随迁开放事实；stairs/不存在的记录不转换', () => {
     const { it, aId, facilityId } = setupCandidate({ name: candidateFact('长椅休息区') });
-    const withToilet = upsertNodeFacilityFact(it, aId, 'toilet', 'open', candidateFact('8:00-18:00'));
+    let withToilet = upsertNodeFacilityFact(it, aId, 'toilet', 'name', candidateFact('东侧公厕'));
+    withToilet = upsertNodeFacilityFact(withToilet, aId, 'toilet', 'open', candidateFact('8:00-18:00'));
+    withToilet = upsertNodeFacilityFact(
+      withToilet,
+      aId,
+      'toilet',
+      'location',
+      candidateFact({ longitude: 116.402, latitude: 39.912 }),
+    );
     const toiletId = withToilet.facilities.find((f) => f.kind === 'toilet')!.id;
-    const wrongKind = convertRestCandidateToRestNode(withToilet, toiletId, aId);
+    const toilet = convertRestCandidateToRestNode(withToilet, toiletId, aId);
+    expect(toilet.nodeId).not.toBeNull();
+    const toiletPlace = toilet.itinerary.places[(toilet.itinerary.nodes[toilet.nodeId!] as RestNode).placeId];
+    expect(toiletPlace.name).toBe('东侧公厕');
+    // 开放事实随迁到新节点的 toilet 设施
+    const openFact = toilet.itinerary.facilities.find(
+      (f) => f.kind === 'toilet' && f.target.type === 'node' && f.target.nodeId === toilet.nodeId,
+    );
+    expect(openFact).toBeDefined();
+    expect((openFact!.facts as { open?: { value?: unknown } }).open?.value).toBe('8:00-18:00');
+
+    const stairs = upsertNodeFacilityFact(withToilet, aId, 'stairs', 'exists', candidateFact(true));
+    const stairsId = stairs.facilities.find((f) => f.kind === 'stairs')!.id;
+    const wrongKind = convertRestCandidateToRestNode(stairs, stairsId, aId);
     expect(wrongKind.nodeId).toBeNull();
-    expect(wrongKind.itinerary).toBe(withToilet);
+    expect(wrongKind.itinerary).toBe(stairs);
     const missing = convertRestCandidateToRestNode(withToilet, '不存在的设施记录', aId);
     expect(missing.nodeId).toBeNull();
     expect(missing.itinerary).toBe(withToilet);
-    // 合法候选仍可转换
+    // 合法歇脚候选仍可转换
     expect(convertRestCandidateToRestNode(withToilet, facilityId, aId).nodeId).not.toBeNull();
+  });
+
+  it('同站多条候选按 recordKey（POI）区分，不再 kind 唯一覆盖', () => {
+    const { it, aId } = setupCandidate({ name: candidateFact('长椅休息区') });
+    let next = upsertNodeFacilityFact(it, aId, 'toilet', 'name', candidateFact('厕所甲'), 'poi-a');
+    next = upsertNodeFacilityFact(next, aId, 'toilet', 'open', candidateFact('8:00'), 'poi-a');
+    next = upsertNodeFacilityFact(next, aId, 'toilet', 'name', candidateFact('厕所乙'), 'poi-b');
+    next = upsertNodeFacilityFact(next, aId, 'toilet', 'open', candidateFact('24小时'), 'poi-b');
+    const toilets = next.facilities.filter((f) => f.kind === 'toilet');
+    expect(toilets).toHaveLength(2);
+    const names = toilets.map((f) => (f.facts as { name?: { value?: unknown } }).name?.value).sort();
+    expect(names).toEqual(['厕所乙', '厕所甲'].sort());
   });
 
   it('转换出的休息点遵循既有跳过/恢复规则（资料保留）', () => {

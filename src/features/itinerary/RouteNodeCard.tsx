@@ -15,6 +15,8 @@ export interface RouteNodeCardProps {
   facilities?: FacilityRecord[];
   /** 歇脚点候选一键转休息点（Task 3 / R-B）；未提供时不显示转换入口 */
   onConvertRestCandidate?: (facilityId: string) => void;
+  /** 厕所候选加入路线（R03）：绕行步行计入总量 */
+  onConvertToiletCandidate?: (facilityId: string) => void;
   index: number | null;
   isFirst: boolean;
   isLast: boolean;
@@ -53,7 +55,7 @@ function facilitySummary(f: FacilityRecord): string | null {
       : open?.value
         ? `你已核对：${String(open.value)}`
         : '你已核对';
-    return name ? `厕所：${name}（${status}）` : `厕所（${status}）`;
+    return name ? `厕所候选：${name}（${status}）` : `厕所候选（${status}）`;
   }
   return null;
 }
@@ -63,13 +65,15 @@ function facilityItem(f: FacilityRecord): string | null {
   const summary = facilitySummary(f);
   if (summary !== null) return summary;
   if (f.kind === 'rest-candidate') return '歇脚点候选（名称待补充，座位待确认）';
+  if (f.kind === 'toilet') return '厕所候选（名称待补充，开放待确认）';
   return null;
 }
 
-/** 转换后的显示名：名称缺失→“未命名歇脚点”（与领域层转换口径一致） */
+/** 转换后的显示名：名称缺失→按类型回退（与领域层转换口径一致） */
 function candidateDisplayName(f: FacilityRecord): string {
   const rawName = (f.facts as Record<string, Fact<unknown> | undefined>).name?.value;
-  return typeof rawName === 'string' && rawName.trim() ? rawName.trim() : '未命名歇脚点';
+  if (typeof rawName === 'string' && rawName.trim()) return rawName.trim();
+  return f.kind === 'toilet' ? '未命名厕所' : '未命名歇脚点';
 }
 
 export function RouteNodeCard({
@@ -77,6 +81,7 @@ export function RouteNodeCard({
   place,
   facilities = [],
   onConvertRestCandidate,
+  onConvertToiletCandidate,
   index,
   isFirst,
   isLast,
@@ -130,6 +135,16 @@ export function RouteNodeCard({
                   onClick={() => onConvertRestCandidate(f.id)}
                 >
                   转为休息点
+                </button>
+              ) : null}
+              {f.kind === 'toilet' && onConvertToiletCandidate ? (
+                <button
+                  type="button"
+                  className={`${styles.btn} ${styles.small}`}
+                  aria-label={`加入路线（厕所）：${candidateDisplayName(f)}`}
+                  onClick={() => onConvertToiletCandidate(f.id)}
+                >
+                  加入路线
                 </button>
               ) : null}
             </li>

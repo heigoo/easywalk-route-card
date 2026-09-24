@@ -41,8 +41,14 @@ export interface FacilityDialogProps {
   preset?: 'stairs';
   itinerary: Itinerary;
   onClose: () => void;
-  /** 由调用方应用 upsertFacilityFactForTarget */
-  onSave: (target: FacilityTarget, kind: FacilityKind, factKey: string, fact: Fact<unknown>) => void;
+  /** 由调用方应用 upsertFacilityFactForTarget；recordKey=地图候选 POI id（同站多候选） */
+  onSave: (
+    target: FacilityTarget,
+    kind: FacilityKind,
+    factKey: string,
+    fact: Fact<unknown>,
+    recordKey?: string | null,
+  ) => void;
 }
 
 function matchesTarget(a: FacilityTarget, b: FacilityTarget): boolean {
@@ -53,8 +59,17 @@ function matchesTarget(a: FacilityTarget, b: FacilityTarget): boolean {
   );
 }
 
-function getFact(it: Itinerary, target: FacilityTarget, kind: FacilityKind, key: string): Fact<unknown> | null {
-  const rec = it.facilities.find((f) => f.kind === kind && matchesTarget(f.target, target));
+function getFact(
+  it: Itinerary,
+  target: FacilityTarget,
+  kind: FacilityKind,
+  key: string,
+  recordKey?: string | null,
+): Fact<unknown> | null {
+  const rk = recordKey ?? null;
+  const rec = it.facilities.find(
+    (f) => f.kind === kind && matchesTarget(f.target, target) && (f.recordKey ?? null) === rk,
+  );
   return (rec?.facts[key] as Fact<unknown> | undefined) ?? null;
 }
 
@@ -135,6 +150,8 @@ type PendingWrite = {
   label: string;
   /** 是否属于“已核对→待确认”的显式回退 */
   rollback: boolean;
+  /** 地图候选 POI id；手动记录为 null */
+  recordKey?: string | null;
 };
 
 export function FacilityDialog({ open, node, legId = null, preset, itinerary, onClose, onSave }: FacilityDialogProps) {
@@ -216,7 +233,7 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
 
   /** 提交“确认修改”的待写入项（只含本次实际改动），随后关闭弹层 */
   const submit = (writes: PendingWrite[]) => {
-    for (const w of writes) onSave(target, w.kind, w.factKey, w.fact);
+    for (const w of writes) onSave(target, w.kind, w.factKey, w.fact, w.recordKey ?? null);
     onClose();
   };
 
@@ -251,13 +268,14 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
     setCandSeat('unknown');
   };
 
-  /** 确认写入候选：逐属性确认后落 facilityRecord（kind=toilet/rest-candidate，target=该节点） */
+  /** 确认写入候选：逐属性确认后落 facilityRecord（kind=toilet/rest-candidate，target=该节点，按 POI id 分条） */
   const confirmCandidate = (item: PlaceSearchItem) => {
     if (!target || !fetchedAt) return;
     const now = new Date().toISOString();
     const kind: FacilityKind = category === 'TOILET' ? 'toilet' : 'rest-candidate';
+    const rk = item.id;
     // 名称、地址按候选原文写入；地址缺失写“未知”，避免残留旧候选地址
-    onSave(target, kind, 'name', candidateCheckedFact(item.name, item, fetchedAt, now, itinerary.travelDate));
+    onSave(target, kind, 'name', candidateCheckedFact(item.name, item, fetchedAt, now, itinerary.travelDate), rk);
     onSave(
       target,
       kind,
@@ -265,6 +283,7 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
       item.address.trim()
         ? candidateCheckedFact(item.address.trim(), item, fetchedAt, now, itinerary.travelDate)
         : unknownFact(),
+      rk,
     );
     // 候选坐标写入 location 事实（GCJ-02 坐标对象）：转休息点时带出坐标，可自动获取步行数据与绕行对比；
     // 候选无坐标记为未知（不猜坐标），转换后明确提示“位置待确认”
@@ -275,6 +294,7 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
       item.location
         ? candidateCheckedFact(item.location, item, fetchedAt, now, itinerary.travelDate)
         : unknownFact(),
+      rk,
     );
     if (kind === 'toilet') {
       // 待确认＝未知，不写成“不开放”
@@ -285,6 +305,7 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
         candOpenState === 'checked'
           ? candidateCheckedFact(candOpenText.trim() || null, item, fetchedAt, now, itinerary.travelDate)
           : unknownFact(),
+        rk,
       );
     } else {
       onSave(
@@ -294,17 +315,11 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
         candSeat === 'unknown'
           ? unknownFact()
           : candidateCheckedFact(candSeat === 'yes', item, fetchedAt, now, itinerary.travelDate),
+        rk,
       );
     }
-    // 同步手动录入区显示为刚写入的内容，避免“确认修改”用旧值覆盖候选事实
-    if (kind === 'toilet') {
-      setToiletState(candOpenState);
-      setToiletText(candOpenText);
-    } else {
-      setRestName(item.name);
-      setRestAddress(item.address.trim());
-      setRestSeat(candSeat);
-    }
+    // 不把候选值同步进手动表单：同站多候选按 POI 分条落库，
+    // “确认修改”只写手动记录（recordKey=null），避免再生成一条重复摘要。
     setRecordedIds((ids) => (ids.includes(item.id) ? ids : [...ids, item.id]));
     setExpandedId(null);
   };
@@ -335,7 +350,7 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
       // 歇脚点候选手动块（3.3）：有输入或已有记录才写，避免产生空记录
       const hasRestInput = restName.trim() !== '' || restAddress.trim() !== '' || restSeat !== 'unknown';
       const hasRestRecord = itinerary.facilities.some(
-        (f) => f.kind === 'rest-candidate' && matchesTarget(f.target, target),
+        (f) => f.kind === 'rest-candidate' && matchesTarget(f.target, target) && (f.recordKey ?? null) === null,
       );
       if (hasRestInput || hasRestRecord) {
         push('rest-candidate', 'name', restName.trim() ? userCheckedFact(restName.trim(), now, itinerary.travelDate) : unknownFact());
@@ -560,9 +575,11 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
                             </select>
                           </div>
                         )}
-                        {itinerary.facilities.some((f) => f.kind === kind && matchesTarget(f.target, target)) ? (
+                        {itinerary.facilities.some(
+                          (f) => f.kind === kind && matchesTarget(f.target, target) && (f.recordKey ?? null) === item.id,
+                        ) ? (
                           <p className={editor.boxHint}>
-                            该站已有{kind === 'toilet' ? '厕所' : '歇脚点候选'}记录，确认写入会更新（覆盖）原有同名属性。
+                            已记录过同一候选（同一 POI），确认写入会更新（覆盖）该候选原有同名属性。
                           </p>
                         ) : null}
                         <p className={editor.boxHint}>
