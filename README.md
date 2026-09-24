@@ -85,6 +85,9 @@ npm run build                      # 生产构建（含独立 planner.worker 分
 | 开放时间严格文法与同义词表（星期X/工作日/24小时） | `src/domain/opening.ts` |
 | 入口未确认提示（不阻断矩阵） | `src/domain/status.ts` `unconfirmedEntrancePlaceNames` |
 | 地图值的采纳与离线可见（未采纳值不落盘） | `adoptAllMapLegs`、`src/storage/local.ts` `toPersisted` |
+| 地图估算不覆盖手动/已采纳/同一入口腿（C3） | `isUserOwnedLeg` + `applyMatrixEdges` / `applySessionEdges` |
+| 开放时间：多时段空档等待、明确不开放、超闭门均显式提示 | `compute.ts` `evaluateOpening` + `openWaits` / `closingConflicts` |
+| 已核实坐休＝座位已确认的独立休息点（与分界资格解耦） | `compute.ts` `plannedRestCount` |
 | 卡片状态合成：blocked / violated / draft / complete | `src/domain/status.ts` |
 | 预览与导出共用同一 `CardViewModel` 实例 | `buildCardViewModel` + `RouteCard` |
 | 固定 360px 逻辑宽度、960px 分页预算、3 倍像素密度 | `src/features/export/paginate.ts`、`measure.ts` |
@@ -110,6 +113,7 @@ npm run build                      # 生产构建（含独立 planner.worker 分
 | T20 错误正文不含凭据 | `tests/server/*`（断言响应与日志字段） |
 | T21 320/360px 视口与纸面缩放 | `tests/e2e/journey.spec.ts` |
 | T22 采纳后离线查看与导出 | `tests/domain/itinerary.test.ts`、`tests/storage/local.test.ts` |
+| 代码审查修复回归（C1–C4、M5–M9/M17、导出规格、隐私载荷） | `tests/domain/review-fixes.test.ts` |
 
 ## 真实环境核验记录（2026-09-22）
 

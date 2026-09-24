@@ -8,7 +8,13 @@
  * 注意：本函数不修改跳过状态、不删除节点；应用前须由调用方校验输入指纹一致。
  */
 import type { Itinerary, Leg } from '../../shared/contracts/domain';
-import { convertFacilityCandidateToRestNode, deriveEffectiveWalkSeconds, rebuildLegs, touchItinerary } from './itinerary';
+import {
+  convertFacilityCandidateToRestNode,
+  deriveEffectiveWalkSeconds,
+  isUserOwnedLeg,
+  rebuildLegs,
+  touchItinerary,
+} from './itinerary';
 
 /** 会话内可用的地图边值（来自本次矩阵响应） */
 export interface MatrixEdgeValue {
@@ -20,6 +26,9 @@ export interface MatrixEdgeValue {
   providerApiVersion: string | null;
   fetchedAt: string;
   state: 'ready' | 'unreachable';
+  /** 坐标版本：写入前比对，过期边丢弃（与 applyMatrixEdges 口径一致） */
+  fromCoordinateRevision?: number;
+  toCoordinateRevision?: number;
   /** 地图报告属性（如阶梯），未核实，随会话地图值写入 Leg（不落盘）；缺失按空处理 */
   reportedFeatures?: Array<{ kind: string; note: string }>;
 }
@@ -60,6 +69,7 @@ export function applyPlannerCandidate(
   // 候选未包含的节点：省略的可选景点与已跳过节点，保持原有相对顺序追加在后
   // nodeOrder 只含路线节点（不含起终点，起终点在 origin/destination）
   const leftovers = base.nodeOrder.filter((id) => !inCandidate.has(id));
+  // M27：候选含未知 id 时不静默拼接——过滤掉无资料节点（调用方须校验输入指纹一致）
   const reorderedNodes = resolvedOrder.filter((id) => Boolean(base.nodes[id]));
   const nodeOrder = [...reorderedNodes, ...leftovers];
 
@@ -77,7 +87,7 @@ export function applyPlannerCandidate(
   return touchItinerary(next);
 }
 
-/** 只对候选采用的边写入会话内地图值；已采纳路段不被覆盖（第 8.5 节） */
+/** 只对候选采用的边写入会话内地图值；手动/已采纳/同一入口路段不被覆盖（第 8.5 节，C3） */
 function applySessionEdges(
   it: Itinerary,
   adoptedLegKeys: string[],
@@ -89,8 +99,15 @@ function applySessionEdges(
   for (const [id, leg] of Object.entries(it.legs)) {
     const key = edgeKey(leg.fromNodeId, leg.toNodeId);
     const edge = byKey.get(key);
-    if (!keys.has(key) || !edge || leg.durationSource === 'adopted' || leg.durationSource === 'same-entrance') {
+    if (!keys.has(key) || !edge || isUserOwnedLeg(leg)) {
       legs[id] = leg;
+      continue;
+    }
+    // 坐标版本校验：过期边不写入（M27）
+    if (
+      (edge.fromCoordinateRevision !== undefined && edge.fromCoordinateRevision !== leg.fromCoordinateRevision) ||
+      (edge.toCoordinateRevision !== undefined && edge.toCoordinateRevision !== leg.toCoordinateRevision)
+    ) {
       continue;
     }
     if (edge.state === 'unreachable') {

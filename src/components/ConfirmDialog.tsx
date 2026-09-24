@@ -28,14 +28,19 @@ export function ConfirmDialog({
     <Dialog open={open} onOpenChange={(o) => (o ? undefined : onCancel())} title={title}>
       <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{description}</p>
       <div className={styles.actions}>
-        <button type="button" className={editor.btn} onClick={onCancel}>
+        <button
+          type="button"
+          className={editor.btn}
+          onClick={onCancel}
+          // 危险操作默认聚焦「取消」，避免误按回车即删除
+          autoFocus
+        >
           取消
         </button>
         <button
           type="button"
           className={`${editor.btn} ${danger ? editor.danger : editor.primary}`}
           onClick={onConfirm}
-          autoFocus
         >
           {confirmText}
         </button>

@@ -6,7 +6,6 @@ import {
   addVisitNode,
   createEmptyItinerary,
   setEndpoint,
-  setManualLegTime,
   skipNode,
   upsertPlace,
 } from '../../src/domain/itinerary';
@@ -15,7 +14,7 @@ import {
   markLegsFetchFailed,
   markLegsFetching,
 } from '../../src/domain/pendingLegs';
-import { makePlace } from '../helpers';
+import { makePlace, setManualLeg } from '../helpers';
 
 function setup() {
   let it = createEmptyItinerary('2026-09-22T00:00:00.000Z');
@@ -30,7 +29,7 @@ function setup() {
   const legOA = Object.values(it.legs).find(
     (l) => l.fromNodeId === it.origin!.id && l.toNodeId === aId,
   )!;
-  it = setManualLegTime(it, legOA.id, { walkingSeconds: 12 * 60 });
+  it = setManualLeg(it, legOA.id, { walkingSeconds: 12 * 60 });
   return { it, pO, pA, pB, aId, legOA: legOA.id };
 }
 
@@ -54,7 +53,7 @@ describe('collectPendingLegs（R07 V1.1）', () => {
     const legAC = Object.values(it2.legs).find(
       (l) => l.fromNodeId === aId && l.toNodeId === cId,
     )!;
-    it2 = setManualLegTime(it2, legAC.id, { walkingSeconds: 8 * 60 });
+    it2 = setManualLeg(it2, legAC.id, { walkingSeconds: 8 * 60 });
     it2 = skipNode(it2, aId);
     const report = collectPendingLegs(it2);
     const pairs = report.fetchable.map((e) => `${e.fromNodeId}>${e.toNodeId}`);

@@ -94,7 +94,7 @@ export function createAmapClient(options: AmapClientOptions): AmapClient {
       return new AmapError('UPSTREAM_TIMEOUT', '上游请求超时', { transient: true });
     }
     if (error instanceof TypeError) {
-      // DNS/连接重置等网络类短暂故障：重试一次后仍失败统一报 UPSTREAM_TIMEOUT（无可用上游响应）
+      // DNS/连接重置等网络类短暂故障（M38：不一律报“超时”）
       return new AmapError('UPSTREAM_TIMEOUT', '上游网络故障', { transient: true });
     }
     return new AmapError('UPSTREAM_DATA_INVALID', '上游调用异常');
@@ -120,8 +120,9 @@ export function createAmapClient(options: AmapClientOptions): AmapClient {
         if (!response.ok) {
           // 非 2xx：429 视为配额/QPS；408/504 视为可重试的网关超时；其余按上游数据异常处理（不重试）
           if (response.status === 429) throw new AmapError('AMAP_QUOTA_EXCEEDED', '上游访问频率限制');
-          if (response.status === 408 || response.status === 504) {
-            throw new AmapError('UPSTREAM_TIMEOUT', '上游网关超时', { transient: true });
+          // M38：502/503/408/504 按网关类短暂故障有限重试
+          if (response.status === 408 || response.status === 502 || response.status === 503 || response.status === 504) {
+            throw new AmapError('UPSTREAM_TIMEOUT', '上游网关暂时不可用', { transient: true });
           }
           throw new AmapError('UPSTREAM_DATA_INVALID', `上游 HTTP ${response.status}`);
         }

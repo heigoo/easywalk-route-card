@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "description": "省脚力路线卡 / EasyWalk Route Card — 大字版路线卡编辑与导出工具",
+  "engines": {
+    "node": ">=20.12.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

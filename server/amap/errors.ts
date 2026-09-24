@@ -47,6 +47,7 @@ export function isAmapError(error: unknown): error is AmapError {
  * 高德业务 infocode → 本站错误码（第 7.3/7.5 节）：
  * 10003 为日配额超限、10004 为访问过频（QPS）；其余 1xxxx 鉴权类；
  * 高德 2xxxx 为参数/协议类；其余未知错误一律 UPSTREAM_DATA_INVALID，不当网络故障重试。
+ * 用户可见 message 用中文白名单，不透传上游 info 原文（M38）。
  */
 export function amapInfocodeToFailureCode(infocode: unknown): FailureCode {
   const code =
@@ -56,3 +57,15 @@ export function amapInfocodeToFailureCode(infocode: unknown): FailureCode {
   if (/^2\d{4}$/.test(code)) return 'INVALID_INPUT';
   return 'UPSTREAM_DATA_INVALID';
 }
+
+/** 错误码 → 用户可读中文文案（白名单） */
+export const FAILURE_MESSAGES: Record<FailureCode, string> = {
+  INVALID_INPUT: '请求参数不合法',
+  AMAP_NOT_CONFIGURED: '服务端未配置高德 Web 服务 Key',
+  AMAP_AUTH_ERROR: '地图服务鉴权失败',
+  AMAP_QUOTA_EXCEEDED: '地图服务访问频率或配额受限',
+  UPSTREAM_TIMEOUT: '地图服务暂时不可用',
+  ROUTE_UNREACHABLE: '该路段暂不可达',
+  UPSTREAM_DATA_INVALID: '地图返回数据异常',
+  REQUEST_CANCELLED: '请求已取消',
+};

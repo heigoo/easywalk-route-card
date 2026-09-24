@@ -16,11 +16,13 @@ import { readFileSync } from 'node:fs';
 const HOST = 'https://restapi.amap.com';
 
 function loadKey() {
-  if (process.env.AMAP_WEB_SERVICE_KEY) return process.env.AMAP_WEB_SERVICE_KEY.trim();
+  if (process.env.AMAP_WEB_SERVICE_KEY) return process.env.AMAP_WEB_SERVICE_KEY.trim().replace(/^["']|["']$/g, '');
   try {
     const text = readFileSync(new URL('../.env', import.meta.url), 'utf8');
     const line = text.split(/\r?\n/).find((l) => l.trim().startsWith('AMAP_WEB_SERVICE_KEY='));
-    return line ? line.slice(line.indexOf('=') + 1).trim() : '';
+    if (!line) return '';
+    const raw = line.slice(line.indexOf('=') + 1).trim();
+    return raw.replace(/^["']|["']$/g, '');
   } catch {
     return '';
   }
@@ -169,3 +171,9 @@ if (full) {
 }
 
 console.log(JSON.stringify({ verifiedAt: new Date().toISOString(), gateway: HOST, results }, null, 2));
+
+const failed = results.some((r) => r.businessOk === false || r.error);
+if (failed) {
+  console.error('核验未全部通过（见上方 businessOk / error 字段）');
+  process.exit(1);
+}

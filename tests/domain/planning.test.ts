@@ -8,11 +8,10 @@ import {
   addVisitNode,
   adoptAllMapLegs,
   setEndpoint,
-  setManualLegTime,
   upsertPlace,
   createEmptyItinerary,
 } from '../../src/domain/itinerary';
-import { makePlace } from '../helpers';
+import { makePlace, setManualLeg } from '../helpers';
 
 /** 起点→A→B→终点，A 必去、B 可选 */
 function setup() {
@@ -89,7 +88,7 @@ describe('applyPlannerCandidate（第 6.5 节）', () => {
     const { it, aId, oId, dId } = setup();
     // 先手动填 O→A 并采纳（模拟会话内已采纳）
     const leg = Object.values(it.legs).find((l) => l.fromNodeId === oId && l.toNodeId === aId)!;
-    const withManual = setManualLegTime(it, leg.id, { walkingSeconds: 700 });
+    const withManual = setManualLeg(it, leg.id, { walkingSeconds: 700 });
     // 手动值本身不会被覆盖（durationSource=manual）
     const applied = applyPlannerCandidate(
       withManual,
@@ -107,9 +106,10 @@ describe('applyPlannerCandidate（第 6.5 节）', () => {
         },
       ],
     );
-    // 候选应用的边会更新该路段为地图值（用户主动应用候选＝主动采用这次结果）
+    // C3：手动已填值不被地图/候选静默覆盖
     const appliedLeg = Object.values(applied.legs).find((l) => l.fromNodeId === oId && l.toNodeId === aId)!;
-    expect(appliedLeg.effectiveWalkingSeconds).toBe(500);
+    expect(appliedLeg.effectiveWalkingSeconds).toBe(700);
+    expect(appliedLeg.durationSource).toBe('manual');
 
     // 已采纳（adopted）路段则保持采纳值不被覆盖
     const { itinerary: adopted } = adoptAllMapLegs(

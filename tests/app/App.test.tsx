@@ -12,10 +12,9 @@ import {
   applyMatrixEdges,
   createEmptyItinerary,
   setEndpoint,
-  setManualLegTime,
   upsertPlace,
 } from '../../src/domain/itinerary';
-import { makePlace } from '../helpers';
+import { makePlace, setManualLeg } from '../helpers';
 
 function fileOf(text: string): File {
   return new File([text], 'backup.json', { type: 'application/json' });
@@ -62,7 +61,7 @@ function backupWithThreeLegs(): File {
   const legBetween = (from: string, to: string) =>
     Object.values(it.legs).find((l) => l.fromNodeId === from && l.toNodeId === to)!;
   // A→C 手动填写
-  it = setManualLegTime(it, legBetween(aId, cId).id, { walkingSeconds: 8 * 60 });
+  it = setManualLeg(it, legBetween(aId, cId).id, { walkingSeconds: 8 * 60 });
   // C→E 地图值并采纳（旧采纳时间后续不得被改写）
   it = applyMatrixEdges(it, [matrixEdge(cId, eId, 300)]);
   it = adoptAllMapLegs(it, '2026-09-01T02:00:00.000Z').itinerary;

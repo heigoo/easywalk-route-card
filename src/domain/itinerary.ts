@@ -366,6 +366,24 @@ function legKey(l: {
 }
 
 /**
+ * 是否为用户数据腿（地图估算不得覆盖）：
+ * - adopted / same-entrance 一律保护；
+ * - manual 仅在已填有效值（ready）时保护——missing 空腿仍可接收地图值。
+ */
+export function isUserOwnedLeg(leg: Leg): boolean {
+  if (leg.durationSource === 'adopted' || leg.durationSource === 'same-entrance') return true;
+  return leg.durationSource === 'manual' && leg.state === 'ready';
+}
+
+/** 同身份腿去重优先级：same-entrance > adopted > 已填 manual > amap/其它 */
+function legKeepPriority(leg: Leg): number {
+  if (leg.durationSource === 'same-entrance') return 4;
+  if (leg.durationSource === 'adopted') return 3;
+  if (leg.durationSource === 'manual' && leg.state === 'ready') return 2;
+  return 1;
+}
+
+/**
  * 路段重建（第 8.3 节）：
  * - 沿用端点身份、地点引用、坐标版本仍匹配的路段（含已采纳路段）；
  * - 其余转为 missing，不用旧时间顶替新路段；
@@ -374,8 +392,13 @@ function legKey(l: {
  */
 export function rebuildLegs(it: Itinerary): Itinerary {
   const seq = activeIdsWithEndpoints(it);
+  // M16：同身份腿按优先级去重，避免 Object.values().find 键序运气
   const byKey = new Map<string, Leg>();
-  for (const leg of Object.values(it.legs)) byKey.set(legKey(leg), leg);
+  for (const leg of Object.values(it.legs)) {
+    const key = legKey(leg);
+    const prev = byKey.get(key);
+    if (!prev || legKeepPriority(leg) > legKeepPriority(prev)) byKey.set(key, leg);
+  }
 
   const usedLegIds = new Set<string>();
   const newLegs: Record<string, Leg> = {};
@@ -475,6 +498,7 @@ export function rebuildLegs(it: Itinerary): Itinerary {
   // 未被当前序列使用、但坐标版本仍有效的路段（如跳过节点的邻居路段）予以保留；
   // 坐标版本过期的旧身份清除，并把挂在它们上的设施关联移除（第 4.4 节）。
   const keptLegs: Record<string, Leg> = { ...newLegs };
+  const keptKeys = new Set(Object.values(keptLegs).map((l) => legKey(l)));
   const removedLegIds = new Set<string>();
   for (const leg of Object.values(it.legs)) {
     if (usedLegIds.has(leg.id)) continue;
@@ -487,8 +511,11 @@ export function rebuildLegs(it: Itinerary): Itinerary {
       toRef.placeId === leg.toPlaceId &&
       fromRef.coordinateRevision === leg.fromCoordinateRevision &&
       toRef.coordinateRevision === leg.toCoordinateRevision;
-    if (stillValid) {
+    const key = legKey(leg);
+    // 已有同身份腿（含当前序列生成的）则不再保留旧重复腿
+    if (stillValid && !keptKeys.has(key)) {
       keptLegs[leg.id] = leg;
+      keptKeys.add(key);
     } else {
       removedLegIds.add(leg.id);
     }
@@ -513,6 +540,11 @@ function activeIdsWithEndpoints(it: Itinerary): string[] {
   return ids;
 }
 
+/** 手动填写结果：拒绝时携带原因，避免静默吞掉非法写入 */
+export type SetManualLegResult =
+  | { ok: true; itinerary: Itinerary }
+  | { ok: false; reason: 'notFound' | 'invalid' };
+
 /** 手动填写路段耗时（第 4.5 节）：手动值不乘步速因子 */
 export function setManualLegTime(
   it: Itinerary,
@@ -523,9 +555,9 @@ export function setManualLegTime(
     mode?: Leg['mode'];
     distanceMeters?: number | null;
   },
-): Itinerary {
+): SetManualLegResult {
   const leg = it.legs[legId];
-  if (!leg) return it;
+  if (!leg) return { ok: false, reason: 'notFound' };
   const mode = patch.mode ?? leg.mode;
   const walk = patch.walkingSeconds;
   const total =
@@ -536,7 +568,7 @@ export function setManualLegTime(
         : leg.totalTravelSeconds;
   if (walk !== null && total !== null && total < walk) {
     // 总耗时不得小于步行部分；调用方应先做表单校验，这里防御性拒绝
-    return it;
+    return { ok: false, reason: 'invalid' };
   }
   const next: Leg = {
     ...leg,
@@ -549,7 +581,7 @@ export function setManualLegTime(
     state: walk === null ? 'missing' : 'ready',
     failureCode: null,
   };
-  return touch({ ...it, legs: { ...it.legs, [legId]: next } });
+  return { ok: true, itinerary: touch({ ...it, legs: { ...it.legs, [legId]: next } }) };
 }
 
 /**
@@ -584,8 +616,8 @@ export function applyMatrixEdges(
         l.toCoordinateRevision === edge.toCoordinateRevision,
     );
     if (!leg) continue;
-    if (leg.durationSource === 'adopted') {
-      // 已采纳路段作为用户数据保留，不被地图值静默覆盖（第 8.5 节）
+    // C3：用户已填数据不被地图估算静默覆盖（第 8.5 节）；missing 空腿可接收地图值
+    if (isUserOwnedLeg(leg)) {
       continue;
     }
     if (edge.state === 'unreachable') {
@@ -677,10 +709,10 @@ export function adoptAllMapLegs(it: Itinerary, now: string = new Date().toISOStr
 }
 
 /**
- * 恢复为地图值（第 8.5 节）：该路段回到待获取，需联网重新获取；
- * 不保留已采纳值作为另一份可对照的数据。
+ * 清空该路段回到待获取（第 8.5 节）：需联网重新获取或手动填写；
+ * 不保留已采纳值作为另一份可对照的数据。（原名 restoreLegToMapValue，名实不符，已更名）
  */
-export function restoreLegToMapValue(it: Itinerary, legId: string): Itinerary {
+export function clearLegToMissing(it: Itinerary, legId: string): Itinerary {
   const leg = it.legs[legId];
   if (!leg || leg.durationSource !== 'adopted') return it;
   const next: Leg = {
@@ -778,6 +810,9 @@ export function upsertNodeFacilityFact(
 export function hasPendingLegs(it: Itinerary): boolean {
   return Object.values(it.legs).some((l) => l.state === 'missing' || l.state === 'stale');
 }
+
+/** 兼容名：清空路段回待获取（实现已统一为 clearLegToMissing） */
+export const restoreLegToMapValue = clearLegToMissing;
 
 /** 供其他领域模块复用：确认有效修改（递增 revision、刷新 updatedAt） */
 export { touch as touchItinerary };

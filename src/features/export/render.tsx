@@ -37,9 +37,25 @@ export async function renderPageToPng(vm: CardViewModel, page: RenderPage): Prom
       canvasWidth: PAPER_WIDTH * PIXEL_RATIO,
       backgroundColor: '#ffffff',
     });
-    const res = await fetch(dataUrl);
-    const blob = await res.blob();
-    if (blob.size === 0) throw new ExportError('生成空白图片，请重试');
+    // M37：toBlob 直接转 Blob，避免 dataURL 经 fetch 的内存峰值
+    const blob = await new Promise<Blob | null>((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(null);
+          return;
+        }
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob((b) => resolve(b), 'image/png');
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
+    if (!blob || blob.size === 0) throw new ExportError('生成空白图片，请重试');
     return blob;
   } finally {
     if (root) {

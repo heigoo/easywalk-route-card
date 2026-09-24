@@ -9,7 +9,6 @@ import { activeSequence } from '../../shared/contracts/domain';
 export function computeInputFingerprint(it: Itinerary): string {
   const seq = activeSequence(it);
   const relevant = {
-    titleIgnored: undefined,
     seq,
     nodes: seq.map((id) => {
       const n = it.nodes[id];
@@ -35,7 +34,17 @@ export function computeInputFingerprint(it: Itinerary): string {
     timezone: it.timezone,
     city: it.city,
   };
-  return fnv1a(stableStringify(relevant));
+  // 双哈希（FNV-1a 32 位 + 旋转异或），降低碰撞导致的版本校验漏检
+  const s = stableStringify(relevant);
+  return `fp-${fnv1a(s)}-${djb2(s)}`;
+}
+
+function djb2(input: string): string {
+  let hash = 5381;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) + hash + input.charCodeAt(i)) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
 }
 
 /** 确定性 JSON 序列化：对象键排序，保证同构输入得到同一指纹 */

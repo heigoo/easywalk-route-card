@@ -24,13 +24,29 @@ async function parseJson(res: Response): Promise<unknown> {
 }
 
 async function request<T>(path: string, init: RequestInit & { requestId: string }): Promise<T> {
+  const { requestId, ...rest } = init;
   const res = await fetch(path, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+    ...rest,
+    headers: {
+      'Content-Type': 'application/json',
+      // 请求关联标识真正发出（原先塞进 RequestInit 会被 fetch 忽略）
+      'X-Request-Id': requestId,
+      ...(init.headers ?? {}),
+    },
   });
-  const body = (await parseJson(res)) as ApiSuccess<T> | ApiError;
-  if ('code' in body && 'message' in body) {
-    throw new ApiRequestError(body.code, body.message, body.retryable, body.requestId);
+  const body = (await parseJson(res)) as ApiSuccess<T> | ApiError | null;
+  if (body && typeof body === 'object' && 'code' in body && 'message' in body) {
+    throw new ApiRequestError(body.code, body.message, body.retryable, body.requestId || requestId);
+  }
+  // M14：坏响应体不得当成功返回 undefined
+  if (
+    !res.ok ||
+    !body ||
+    typeof body !== 'object' ||
+    !('data' in body) ||
+    (body as ApiSuccess<T>).data === undefined
+  ) {
+    throw new ApiRequestError('UPSTREAM_DATA_INVALID', '响应格式不正确', true, requestId);
   }
   return (body as ApiSuccess<T>).data;
 }

@@ -77,6 +77,11 @@ export function userFact<T>(value: T, note: string | null = null): Fact<T> {
   return { ...unknownFact<T>(), value, sourceType: 'user', reviewState: 'userChecked', note };
 }
 
+/** 日期 YYYY-MM-DD */
+export const travelDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式应为 YYYY-MM-DD');
+/** 本地时刻 HH:mm */
+export const localTimeSchema = z.string().regex(/^\d{2}:\d{2}$/, '时刻格式应为 HH:mm');
+
 /** 明确开放时间窗；空数组＝该日不开放；value=null＝未知 */
 export interface OpeningWindow {
   startLocalTime: string; // "HH:mm"
@@ -179,12 +184,15 @@ export const facilityTargetSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('leg'), legId: z.string().min(1) }),
 ]);
 export type FacilityTarget = z.infer<typeof facilityTargetSchema>;
+/** 松散事实：值任意，但核对/来源字段必须合法（M25） */
+export const looseFactSchema = z.object({ ...factBaseShape, value: z.unknown() });
+
 export const facilityRecordSchema = z.object({
   id: z.string().min(1),
   kind: facilityKindSchema,
   placeId: z.string().nullable(),
   target: facilityTargetSchema,
-  facts: z.record(z.string(), z.unknown()),
+  facts: z.record(z.string(), looseFactSchema),
   /** 同站多条候选的区分键（地图候选 POI id）；手动/旧数据为 null 或缺省 */
   recordKey: z.string().nullable().optional(),
 });
@@ -244,7 +252,7 @@ export const constraintsSchema = z.object({
   maxTotalWalkSeconds: secondsSchema.nullable(),
   maxContinuousWalkSeconds: secondsSchema.nullable(),
   minRestSeconds: secondsSchema.nullable(),
-  latestEndLocal: z.string().nullable(),
+  latestEndLocal: localTimeSchema.nullable(),
   walkingFactor: z.number().positive().finite(),
   passageRequirements: z.array(z.string()),
 });
@@ -257,8 +265,8 @@ export const itinerarySchema = z.object({
   revision: z.number().int().nonnegative(),
   title: z.string(),
   city: z.string(),
-  travelDate: z.string().nullable(),
-  departureLocalTime: z.string().nullable(),
+  travelDate: travelDateSchema.nullable(),
+  departureLocalTime: localTimeSchema.nullable(),
   timezone: z.string().min(1),
   places: z.record(z.string(), placeRefSchema),
   origin: endpointSchema.nullable(),

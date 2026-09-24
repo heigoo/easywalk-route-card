@@ -15,6 +15,8 @@ export interface ExportPanelProps {
   vm: CardViewModel;
   statusKind: CardViewModel['status']['kind'];
   fileBaseName: string;
+  /** 点击导出时冻结文件名（M29）；缺省用 fileBaseName */
+  freezeFileName?: () => string;
   /** 每次递增表示外部请求触发一次导出（手机预览视图的吸底按钮） */
   trigger?: number;
   /** 是否渲染本面板内的导出按钮；窄屏由吸底操作栏承担主入口（需求 9.3） */
@@ -30,12 +32,13 @@ interface PageItem {
 
 type Phase = 'idle' | 'paginating' | 'rendering' | 'done' | 'failed';
 
-export function ExportPanel({ vm, statusKind, fileBaseName, trigger = 0, showTriggerButton = true, onExported }: ExportPanelProps) {
+export function ExportPanel({ vm, statusKind, fileBaseName, freezeFileName, trigger = 0, showTriggerButton = true, onExported }: ExportPanelProps) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [pages, setPages] = useState<PageItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [failedPage, setFailedPage] = useState<number | null>(null);
   const snapshotRef = useRef<CardViewModel | null>(null);
+  const fileBaseRef = useRef(fileBaseName);
   const urlsRef = useRef<string[]>([]);
 
   const blocked = statusKind === 'blocked';
@@ -48,16 +51,21 @@ export function ExportPanel({ vm, statusKind, fileBaseName, trigger = 0, showTri
 
   useEffect(() => releaseUrls, []);
 
-  // 外部触发（窄屏预览视图的吸底导出按钮）
+  // 外部触发（窄屏预览视图的吸底导出按钮）：仅严格递增时启动，避免重挂载用陈旧 trigger 自动重导
+  const consumedTriggerRef = useRef(0);
   useEffect(() => {
-    if (trigger > 0) void start();
+    if (trigger > consumedTriggerRef.current) {
+      consumedTriggerRef.current = trigger;
+      void start();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trigger]);
 
   const start = async () => {
-    // 冻结点击时的快照；后续编辑不影响本次导出
+    // 冻结点击时的快照与文件名；后续编辑不影响本次导出
     const snapshot = vm;
     snapshotRef.current = snapshot;
+    fileBaseRef.current = freezeFileName ? freezeFileName() : fileBaseName;
     setError(null);
     setFailedPage(null);
     releaseUrls();
@@ -98,7 +106,7 @@ export function ExportPanel({ vm, statusKind, fileBaseName, trigger = 0, showTri
   const savePage = (item: PageItem) => {
     const a = document.createElement('a');
     a.href = item.url;
-    a.download = `${fileBaseName}-第${item.page.pageIndex + 1}张.png`;
+    a.download = `${fileBaseRef.current}-第${item.page.pageIndex + 1}张.png`;
     document.body.appendChild(a);
     a.click();
     a.remove();

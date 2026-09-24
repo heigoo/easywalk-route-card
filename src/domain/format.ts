@@ -40,9 +40,9 @@ export function formatShanghaiDateTime(utcIso: string): string {
   return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
 }
 
-/** 行程日期文本；未填写返回 null（不显示精确到达时刻） */
+/** 行程日期文本；未填写或非法返回 null（不显示精确到达时刻） */
 export function travelDateText(travelDate: string | null): string | null {
-  if (!travelDate) return null;
+  if (!travelDate || !/^\d{4}-\d{2}-\d{2}$/.test(travelDate)) return null;
   return travelDate;
 }
 

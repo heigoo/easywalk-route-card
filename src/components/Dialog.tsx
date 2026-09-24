@@ -16,13 +16,15 @@ export interface DialogProps {
 }
 
 export function Dialog({ open, onOpenChange, title, description, children }: DialogProps) {
+  // M40：DOM id 不用含标点的标题拼接
+  const descId = `dialog-desc-${title.replace(/[^\w]+/g, '-').slice(0, 32)}`;
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className={styles.overlay} />
         <DialogPrimitive.Content
           className={styles.content}
-          aria-describedby={description ? `${title}-desc` : undefined}
+          aria-describedby={description ? descId : undefined}
         >
           <div className={styles.header}>
             <DialogPrimitive.Title className={styles.title}>{title}</DialogPrimitive.Title>
@@ -31,7 +33,7 @@ export function Dialog({ open, onOpenChange, title, description, children }: Dia
             </DialogPrimitive.Close>
           </div>
           {description ? (
-            <DialogPrimitive.Description className={styles.description} id={`${title}-desc`}>
+            <DialogPrimitive.Description className={styles.description} id={descId}>
               {description}
             </DialogPrimitive.Description>
           ) : null}

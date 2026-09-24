@@ -143,9 +143,9 @@ export function packBlocks<T extends PackableBlock>(
       }
     }
 
-    // 整块另起一页；原子块自身超过整页预算 → 阻止导出并指出具体块
+    // 整块另起一页；原子块自身超过整页预算 → 阻止导出并指出具体块（M33）
     if (height > pageBudget && block.breakMode === 'atomic') {
-      throw new ExportError('有内容过长超过单页高度，请精简后重试', block.id);
+      throw new ExportError('有一段内容过长超过单页高度，请精简该段后重试', block.id);
     }
     newPage();
     stream.unshift(item);

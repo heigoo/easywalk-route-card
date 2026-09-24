@@ -1,4 +1,4 @@
-﻿﻿/**
+/**
  * 统一样例与可信状态计算口径（验证用例 T01～T04，对应需求 10.3、R04）。
  */
 import { describe, expect, it } from 'vitest';
@@ -9,12 +9,11 @@ import {
   applyWalkingFactor,
   createEmptyItinerary,
   setEndpoint,
-  setManualLegTime,
   skipNode,
   updateNode,
   upsertPlace,
 } from '../../src/domain/itinerary';
-import { buildUnifiedSample, makePlace, SAMPLE } from '../helpers';
+import { buildUnifiedSample, makePlace, SAMPLE, setManualLeg } from '../helpers';
 
 describe('统一样例（T01）', () => {
   it('总步行 43 分钟、全程 100 分钟、最长连续 28 分钟', () => {
@@ -71,8 +70,8 @@ describe('未知休息与连续步行（T03）', () => {
 
     const leg = (from: string, to: string) =>
       Object.values(it.legs).find((l) => l.fromNodeId === from && l.toNodeId === to)!;
-    it = setManualLegTime(it, leg(it.origin!.id, rId).id, { walkingSeconds: 12 * 60 });
-    it = setManualLegTime(it, leg(rId, bId).id, { walkingSeconds: 12 * 60 });
+    it = setManualLeg(it, leg(it.origin!.id, rId).id, { walkingSeconds: 12 * 60 });
+    it = setManualLeg(it, leg(rId, bId).id, { walkingSeconds: 12 * 60 });
     it.constraints.maxContinuousWalkSeconds = 20 * 60;
 
     const stats = computeStats(it);
@@ -102,8 +101,8 @@ describe('未知休息与连续步行（T03）', () => {
     const bId = it.nodeOrder[1];
     const leg = (from: string, to: string) =>
       Object.values(it.legs).find((l) => l.fromNodeId === from && l.toNodeId === to)!;
-    it = setManualLegTime(it, leg(it.origin!.id, rId).id, { walkingSeconds: 12 * 60 });
-    it = setManualLegTime(it, leg(rId, bId).id, { walkingSeconds: 12 * 60 });
+    it = setManualLeg(it, leg(it.origin!.id, rId).id, { walkingSeconds: 12 * 60 });
+    it = setManualLeg(it, leg(rId, bId).id, { walkingSeconds: 12 * 60 });
     it.constraints.minRestSeconds = 10 * 60;
     it.constraints.maxContinuousWalkSeconds = 20 * 60;
 
@@ -123,7 +122,7 @@ describe('已知下界超限（T04）', () => {
     it = addVisitNode(it, pB.id, { visitSeconds: 30 * 60, insideWalkSeconds: null }); // 未知园内步行
     const bId = it.nodeOrder[0];
     const leg = Object.values(it.legs).find((l) => l.fromNodeId === it.origin!.id && l.toNodeId === bId)!;
-    it = setManualLegTime(it, leg.id, { walkingSeconds: 35 * 60 });
+    it = setManualLeg(it, leg.id, { walkingSeconds: 35 * 60 });
     it.constraints.maxTotalWalkSeconds = 30 * 60;
 
     const stats = computeStats(it);
@@ -167,9 +166,9 @@ describe('开放时间等待（第 5.1 节，东八区口径）', () => {
     it = addVisitNode(it, pA.id, { visitSeconds: 60 * 60, insideWalkSeconds: 0 });
     const aId = it.nodeOrder[0];
     const leg = Object.values(it.legs).find((l) => l.fromNodeId === it.origin!.id && l.toNodeId === aId)!;
-    it = setManualLegTime(it, leg.id, { walkingSeconds: 15 * 60 });
+    it = setManualLeg(it, leg.id, { walkingSeconds: 15 * 60 });
     const leg2 = Object.values(it.legs).find((l) => l.fromNodeId === aId && l.toNodeId === it.destination!.id)!;
-    it = setManualLegTime(it, leg2.id, { walkingSeconds: 10 * 60 });
+    it = setManualLeg(it, leg2.id, { walkingSeconds: 10 * 60 });
     return it;
   }
 
@@ -204,9 +203,9 @@ describe('跳站（T05）', () => {
 
     const leg = (from: string, to: string) =>
       Object.values(it.legs).find((l) => l.fromNodeId === from && l.toNodeId === to)!;
-    it = setManualLegTime(it, leg(it.origin!.id, cId).id, { walkingSeconds: 10 * 60 });
-    it = setManualLegTime(it, leg(cId, aId).id, { walkingSeconds: 10 * 60 });
-    it = setManualLegTime(it, leg(aId, it.destination!.id).id, { walkingSeconds: 5 * 60 });
+    it = setManualLeg(it, leg(it.origin!.id, cId).id, { walkingSeconds: 10 * 60 });
+    it = setManualLeg(it, leg(cId, aId).id, { walkingSeconds: 10 * 60 });
+    it = setManualLeg(it, leg(aId, it.destination!.id).id, { walkingSeconds: 5 * 60 });
     expect(computeStats(it).totalWalkSeconds).toBe(25 * 60); // 跳站前合计完整
 
     const skipped = skipNode(it, cId);

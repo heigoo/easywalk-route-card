@@ -6,3 +6,5 @@ export * from './compute';
 export * from './status';
 export * from './pendingLegs';
 export * from './insertRest';
+export * from './opening';
+export * from './planning';

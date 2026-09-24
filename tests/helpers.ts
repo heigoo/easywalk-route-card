@@ -15,6 +15,16 @@ import {
   upsertPlace,
 } from '../src/domain/itinerary';
 
+/** 测试便捷封装：setManualLegTime 失败时原样返回（用例内应自行保证输入合法） */
+export function setManualLeg(
+  it: Itinerary,
+  legId: string,
+  patch: { walkingSeconds: number | null; totalSeconds?: number | null; mode?: 'walking' | 'manual-transfer'; distanceMeters?: number | null },
+): Itinerary {
+  const r = setManualLegTime(it, legId, patch);
+  return r.ok ? r.itinerary : it;
+}
+
 export function makePlace(name: string, lng: number, lat: number, entranceConfirmed = true): PlaceRef {
   return {
     id: newId(),
@@ -111,9 +121,9 @@ export function buildUnifiedSample(): Itinerary {
     Object.values(it.legs).find((l) => l.fromNodeId === from && l.toNodeId === to)!;
 
   const oId = it.origin!.id;
-  it = setManualLegTime(it, legBetween(oId, aId).id, { walkingSeconds: SAMPLE.originToA });
-  it = setManualLegTime(it, legBetween(aId, rId).id, { walkingSeconds: SAMPLE.aToRest });
-  it = setManualLegTime(it, legBetween(rId, bId).id, { walkingSeconds: SAMPLE.restToB });
+  it = setManualLeg(it, legBetween(oId, aId).id, { walkingSeconds: SAMPLE.originToA });
+  it = setManualLeg(it, legBetween(aId, rId).id, { walkingSeconds: SAMPLE.aToRest });
+  it = setManualLeg(it, legBetween(rId, bId).id, { walkingSeconds: SAMPLE.restToB });
   // bId → destination 为同一已确认入口的零衔接边，无需填写
   return it;
 }

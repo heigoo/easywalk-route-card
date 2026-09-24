@@ -94,7 +94,7 @@ describe('packBlocks（第 10.3 节）', () => {
       caught = e;
     }
     expect(caught).toBeInstanceOf(ExportError);
-    expect((caught as ExportError).message).toBe('有内容过长超过单页高度，请精简后重试');
+    expect((caught as ExportError).message).toBe('有一段内容过长超过单页高度，请精简该段后重试');
     expect((caught as ExportError).blockId).toBe('big');
   });
 

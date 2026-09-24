@@ -13,11 +13,10 @@ import {
   addRestNode,
   createEmptyItinerary,
   setEndpoint,
-  setManualLegTime,
   upsertPlace,
 } from '../../src/domain/itinerary';
 import { clearDetourCompares } from '../../src/features/planning/useDetourCompare';
-import { makePlace } from '../helpers';
+import { makePlace, setManualLeg } from '../helpers';
 
 /** Worker 桩：收到请求后同步调用纯函数 plan，并按协议回发 */
 class StubPlannerWorker {
@@ -375,8 +374,8 @@ function restDetourBackup(opts: { nextHasCoord?: boolean } = {}) {
   const rId = it.nodeOrder[0];
   const legBetween = (from: string, to: string) =>
     Object.values(it.legs).find((l) => l.fromNodeId === from && l.toNodeId === to)!;
-  it = setManualLegTime(it, legBetween(it.origin!.id, rId).id, { walkingSeconds: 8 * 60 });
-  it = setManualLegTime(it, legBetween(rId, it.destination!.id).id, { walkingSeconds: 10 * 60 });
+  it = setManualLeg(it, legBetween(it.origin!.id, rId).id, { walkingSeconds: 8 * 60 });
+  it = setManualLeg(it, legBetween(rId, it.destination!.id).id, { walkingSeconds: 10 * 60 });
   return { file: fileOf(JSON.stringify(it)), oId: it.origin!.id, rId, bId: it.destination!.id };
 }
 

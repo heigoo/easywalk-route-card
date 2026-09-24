@@ -12,7 +12,6 @@ import {
   applyMatrixEdges,
   createEmptyItinerary,
   setEndpoint,
-  setManualLegTime,
   upsertPlace,
 } from '../../src/domain/itinerary';
 import {
@@ -31,7 +30,7 @@ import {
   INDEX_KEY,
   STORAGE_KEY,
 } from '../../src/storage/local';
-import { makePlace } from '../helpers';
+import { makePlace, setManualLeg } from '../helpers';
 
 function memoryBackend() {
   const map = new Map<string, string>();
@@ -435,8 +434,8 @@ describe('绕行对照边不落盘（Task 4 / R-D）', () => {
       it = setEndpoint(it, 'destination', pB.id);
       const legBetween = (from: string, to: string) =>
         Object.values(it.legs).find((l) => l.fromNodeId === from && l.toNodeId === to)!;
-      it = setManualLegTime(it, legBetween(it.origin!.id, rId).id, { walkingSeconds: 8 * 60 });
-      it = setManualLegTime(it, legBetween(rId, it.destination!.id).id, { walkingSeconds: 10 * 60 });
+      it = setManualLeg(it, legBetween(it.origin!.id, rId).id, { walkingSeconds: 8 * 60 });
+      it = setManualLeg(it, legBetween(rId, it.destination!.id).id, { walkingSeconds: 10 * 60 });
 
       // 会话内取得“起点→终点”直达对照边
       const req = detourRequestFor(it, rId)!;

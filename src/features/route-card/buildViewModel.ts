@@ -19,10 +19,9 @@ import type {
   SummaryValueState,
 } from './viewModel';
 
-let blockSeq = 0;
-function blockId(prefix: string): string {
-  blockSeq += 1;
-  return `${prefix}-${blockSeq}`;
+/** M35：块 id 用内容稳定键，避免每次编辑整卡 DOM 卸载重挂 */
+function blockId(prefix: string, stable?: string): string {
+  return stable ? `${prefix}-${stable}` : prefix;
 }
 
 export interface BuildInput {
@@ -51,7 +50,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
   const blocks: CardBlock[] = [];
 
   blocks.push({
-    id: blockId('header'),
+    id: blockId('header', 'main'),
     kind: 'header',
     breakMode: 'atomic',
     stickWithNext: true,
@@ -151,12 +150,12 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
       valueText: isEmptyRoute ? '—' : String(stats.plannedRestCount),
       unitText: isEmptyRoute ? '' : '次',
       state: isEmptyRoute ? 'unknown' : 'known',
-      noteText: isEmptyRoute || unverifiedRestCount === 0 ? null : '有休息点未计入（座位或时长待核实）',
+      noteText: isEmptyRoute || unverifiedRestCount === 0 ? null : '有休息点座位待核实，未计入',
     },
   ];
 
   blocks.push({
-    id: blockId('summary'),
+    id: blockId('summary', 'main'),
     kind: 'summary',
     breakMode: 'atomic',
     stickWithNext: true,
@@ -165,9 +164,10 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
   });
 
   // ---- 状态提醒（随图保留） ----
-  for (const n of status.notices) {
+  for (let ni = 0; ni < status.notices.length; ni++) {
+    const n = status.notices[ni];
     blocks.push({
-      id: blockId('notice'),
+      id: blockId('notice', String(ni)),
       kind: 'notice',
       breakMode: 'text',
       stickWithNext: false,
@@ -194,7 +194,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
 
     if (i > 0) {
       const leg = findLegBetween(it, seq[i - 1], id);
-      blocks.push(buildLegBlock(leg, prevNodeName));
+      blocks.push(buildLegBlock(leg, prevNodeName, `${seq[i - 1]}-${id}`));
     }
 
     if (isOrigin || isDestination) {
@@ -202,7 +202,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
       const place = endpoint ? it.places[endpoint.placeId] : null;
       const title = place?.name || (isOrigin ? '起点' : '终点');
       const nodeBlock: NodeBlock = {
-        id: blockId('node'),
+        id: blockId('node', id),
         kind: 'node',
         breakMode: 'atomic',
         stickWithNext: true,
@@ -236,7 +236,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
       notices.push(...collectNodeFacilityNotices(it, id));
 
       const nodeBlock: NodeBlock = {
-        id: blockId('node'),
+        id: blockId('node', id),
         kind: 'node',
         breakMode: 'atomic',
         stickWithNext: true,
@@ -255,7 +255,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
       blocks.push(nodeBlock);
       if (node.notes.trim()) {
         blocks.push({
-          id: blockId('note'),
+          id: blockId('note', id),
           kind: 'note',
           breakMode: 'text',
           stickWithNext: true,
@@ -280,7 +280,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
       if (detour) notices.push({ text: detour.text, severity: 'info' });
       notices.push(...collectNodeFacilityNotices(it, id));
       const nodeBlock: NodeBlock = {
-        id: blockId('node'),
+        id: blockId('node', id),
         kind: 'node',
         breakMode: 'atomic',
         stickWithNext: true,
@@ -295,7 +295,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
       blocks.push(nodeBlock);
       if (node.notes.trim()) {
         blocks.push({
-          id: blockId('note'),
+          id: blockId('note', id),
           kind: 'note',
           breakMode: 'text',
           stickWithNext: true,
@@ -314,7 +314,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
     .filter((n): n is NonNullable<typeof n> => Boolean(n && n.skipped));
   if (skipped.length > 0) {
     blocks.push({
-      id: blockId('skipped'),
+      id: blockId('skipped', 'list'),
       kind: 'skipped',
       breakMode: 'atomic',
       stickWithNext: false,
@@ -329,7 +329,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
   // ---- 数据来源（整张卡只出现一次，位于全部节点之后） ----
   const sourceItems = buildSourceItems(it);
   blocks.push({
-    id: blockId('source'),
+    id: blockId('source', 'main'),
     kind: 'source',
     breakMode: 'atomic',
     stickWithNext: false,
@@ -360,10 +360,10 @@ function findLegBetween(it: Itinerary, fromId: string, toId: string): Leg | unde
   return Object.values(it.legs).find((l) => l.fromNodeId === fromId && l.toNodeId === toId);
 }
 
-function buildLegBlock(leg: Leg | undefined, fromName: string | null): LegBlock {
+function buildLegBlock(leg: Leg | undefined, fromName: string | null, stableId: string): LegBlock {
   if (!leg || leg.state === 'missing') {
     return {
-      id: blockId('leg'),
+      id: blockId('leg', stableId),
       kind: 'leg',
       breakMode: 'atomic',
       stickWithNext: false,
@@ -375,7 +375,7 @@ function buildLegBlock(leg: Leg | undefined, fromName: string | null): LegBlock 
   }
   if (leg.state === 'unreachable' || leg.state === 'failed') {
     return {
-      id: blockId('leg'),
+      id: blockId('leg', stableId),
       kind: 'leg',
       breakMode: 'atomic',
       stickWithNext: false,
@@ -398,7 +398,7 @@ function buildLegBlock(leg: Leg | undefined, fromName: string | null): LegBlock 
     secondary.push('用户填写');
   }
   return {
-    id: blockId('leg'),
+    id: blockId('leg', stableId),
     kind: 'leg',
     breakMode: 'atomic',
     stickWithNext: false,

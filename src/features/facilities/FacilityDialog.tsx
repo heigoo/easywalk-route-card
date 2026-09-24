@@ -503,7 +503,7 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
           ) : null}
           {searchPhase === 'empty' ? (
             <p className={editor.boxHint} role="status">
-              附近没有找到候选，可换类别/半径或手动记录
+              这次没查到候选，可换类别/半径再试或手动记录（没查到不等于没有）
             </p>
           ) : null}
 

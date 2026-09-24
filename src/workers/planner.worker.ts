@@ -20,6 +20,10 @@ export function handlePlannerMessage(message: PlannerRequestMessage): PlannerRes
   const requestId = message?.requestId ?? '';
   const inputFingerprint = message?.inputFingerprint ?? '';
   const base = { requestId, inputFingerprint };
+  // M40：校验消息类型
+  if (!message || typeof message !== 'object' || (message as { type?: unknown }).type !== 'plan') {
+    return { ...base, error: { code: 'PLAN_FAILED', message: '请求消息类型不是 plan' } };
+  }
   if (typeof message?.version !== 'number') {
     return { ...base, error: { code: 'PLAN_FAILED', message: '请求消息缺少协议版本' } };
   }
@@ -34,7 +38,8 @@ export function handlePlannerMessage(message: PlannerRequestMessage): PlannerRes
   }
   try {
     const result = plan(message.input);
-    return { ...base, result };
+    // 回传指纹必须与请求一致，调用方可比对丢弃过期结果
+    return { requestId, inputFingerprint: result.inputFingerprint || inputFingerprint, result };
   } catch (error) {
     return {
       ...base,

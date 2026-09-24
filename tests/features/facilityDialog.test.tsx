@@ -188,7 +188,7 @@ describe('附近候选检索（Task 3 子任务 3.1）', () => {
     render(<FacilityDialog open node={it.nodes[nodeId]} itinerary={it} onClose={() => undefined} onSave={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: '搜索' }));
-    expect(await screen.findByText('附近没有找到候选，可换类别/半径或手动记录')).toBeInTheDocument();
+    expect(await screen.findByText('这次没查到候选，可换类别/半径再试或手动记录（没查到不等于没有）')).toBeInTheDocument();
   });
 
   it('站点无坐标：不发起请求并提示先确认地图位置，手动录入不受影响', async () => {

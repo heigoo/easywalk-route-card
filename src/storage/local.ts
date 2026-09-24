@@ -279,7 +279,9 @@ function readIndex(backend: LocalBackend): RawRead<TripIndex> {
 }
 
 /** 扫描 easywalk.itinerary.* 键：有效记录生成索引项，读不出的记录键保留并列入 skippedIds */
-function scanItineraryRecords(backend: LocalBackend): { items: TripIndexItem[]; skippedIds: string[] } {
+function scanItineraryRecords(
+  backend: LocalBackend,
+): { ok: true; items: TripIndexItem[]; skippedIds: string[] } | { ok: false; error: 'io' } {
   const keys: string[] = [];
   try {
     for (let i = 0; i < backend.length; i++) {
@@ -287,7 +289,8 @@ function scanItineraryRecords(backend: LocalBackend): { items: TripIndexItem[]; 
       if (k && k.startsWith(ITINERARY_KEY_PREFIX)) keys.push(k);
     }
   } catch {
-    return { items: [], skippedIds: [] };
+    // M15：枚举失败不得写成空索引
+    return { ok: false, error: 'io' };
   }
   const items: TripIndexItem[] = [];
   const skippedIds: string[] = [];
@@ -299,7 +302,7 @@ function scanItineraryRecords(backend: LocalBackend): { items: TripIndexItem[]; 
   // 最近更新在前，同时间按 id 排序保证确定性
   items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
   skippedIds.sort();
-  return { items, skippedIds };
+  return { ok: true, items, skippedIds };
 }
 
 /**
@@ -309,7 +312,8 @@ function scanItineraryRecords(backend: LocalBackend): { items: TripIndexItem[]; 
 function resolveItems(backend: LocalBackend): TripIndexItem[] {
   const idx = readIndex(backend);
   if (idx.kind === 'ok') return idx.value.items;
-  return scanItineraryRecords(backend).items;
+  const scan = scanItineraryRecords(backend);
+  return scan.ok ? scan.items : [];
 }
 
 function readCurrentId(backend: LocalBackend): string | null {
@@ -509,7 +513,12 @@ export function createLocalStore(backend: LocalBackend): ItineraryStore {
     },
 
     rebuildIndex(): RebuildIndexResult {
-      const { items, skippedIds } = scanItineraryRecords(backend);
+      const scan = scanItineraryRecords(backend);
+      // M15：枚举失败拒绝写索引，绝不静默清空
+      if (!scan.ok) {
+        return { ok: false, error: '无法枚举本机存储中的行程记录，索引未改写' };
+      }
+      const { items, skippedIds } = scan;
       try {
         const prevCurrent = readCurrentId(backend);
         const currentId = prevCurrent && items.some((i) => i.id === prevCurrent) ? prevCurrent : items[0]?.id ?? null;

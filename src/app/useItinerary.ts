@@ -3,7 +3,7 @@
  * 当前行程拥有用户已确认的数据；所有修改经 apply() 进入领域模型并即时保存到当前行程记录。
  * 多行程：列表 / 新建 / 切换 / 复制 / 重命名 / 删除整份行程记录 / 索引重建（纯本机，不引入账号与云端）。
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Itinerary } from '../../shared/contracts/domain';
 import { computeStats, evaluateConstraints } from '../domain/compute';
 import { synthesizeCardStatus } from '../domain/status';
@@ -80,16 +80,26 @@ export function useItinerary(
     [store],
   );
 
+  const pendingRef = useRef<Itinerary | null>(null);
   const apply = useCallback(
     (fn: (it: Itinerary) => Itinerary) => {
+      // M34：updater 保持纯函数，副作用（持久化）移到 effect
       setItinerary((prev) => {
         const next = fn(prev);
-        persist(next);
+        pendingRef.current = next;
         return next;
       });
     },
-    [persist],
+    [],
   );
+
+  useEffect(() => {
+    const pending = pendingRef.current;
+    if (pending) {
+      pendingRef.current = null;
+      persist(pending);
+    }
+  });
 
   const replace = useCallback(
     (it: Itinerary) => {
@@ -299,11 +309,4 @@ export function useItineraryDerived(itinerary: Itinerary) {
     [itinerary, stats, verdicts, cardStatus],
   );
   return { stats, verdicts, cardStatus, fingerprint, cardViewModel };
-}
-
-/** 导出快照：冻结当前已应用行程的 VM 实例（第 10.1 节第 2 步） */
-export function useSnapshotRef<T>(value: T) {
-  const ref = useRef(value);
-  ref.current = value;
-  return ref;
 }

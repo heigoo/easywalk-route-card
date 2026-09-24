@@ -24,7 +24,6 @@ import {
 import type { PlannerCandidate, PlannerInput, PlannerResult } from './planner-types';
 
 /** 与 domain/compute.ts 一致的时间解析口径：行程当前固定东八区（Asia/Shanghai） */
-const SHANGHAI_OFFSET_SECONDS = 8 * 3600;
 
 export interface PlanOptions {
   /** 注入生成时间（测试用）；缺省为当前时间 */
@@ -218,17 +217,26 @@ function applicableWindows(it: Itinerary, placeId: string): OpeningWindow[] | nu
 
 type VisitEvent =
   | { walkSeconds: number | null }
-  | { restSeat: boolean | null; restSeconds: number | null };
+  | { restSeat: boolean | null; restReviewState?: string; restSeconds: number | null }
+  | { otherSeconds: number | null };
 
-/** 景点园内步行/活动序列（口径同 compute.ts 的 visitWalkEvents，第 5.2 节） */
+/** 景点园内步行/活动序列（口径同 compute.ts 的 visitWalkEvents，第 5.2 节；M17 仅 walk 计步行） */
 function visitWalkEvents(node: VisitNode): VisitEvent[] {
   const plan = node.activityPlan;
   if (plan && plan.mode === 'timeline') {
-    const events: VisitEvent[] = plan.items.map((item) =>
-      item.kind === 'rest'
-        ? { restSeat: item.seatFact.value, restSeconds: item.durationSeconds }
-        : { walkSeconds: item.durationSeconds },
-    );
+    const events: VisitEvent[] = plan.items.map((item) => {
+      if (item.kind === 'rest') {
+        return {
+          restSeat: item.seatFact.value,
+          restReviewState: item.seatFact.reviewState,
+          restSeconds: item.durationSeconds,
+        };
+      }
+      if (item.kind === 'walk') {
+        return { walkSeconds: item.durationSeconds };
+      }
+      return { otherSeconds: item.durationSeconds };
+    });
     if (plan.completeness === 'incomplete') events.push({ walkSeconds: null });
     return events;
   }
@@ -277,6 +285,7 @@ function simulate(
   let walkTotal: number | null = 0;
   let walkKnown = 0;
   let durationIncomplete = false;
+  const violations: string[] = [];
   let elapsed = 0; // 已知用时合计（随推进单调递增的下界）
 
   // 连续步行区间状态（第 5.3 节口径）
@@ -356,16 +365,53 @@ function simulate(
     if (isEndpoint || !node) continue;
 
     if (node.kind === 'visit') {
-      // 第 6.4.4 节：开放时间等待——时段适用且到达早于开窗则累计等待
+      // 第 6.4.4 节：开放时间等待——多时段空档等到下一窗口；明确不开放记违规（M5/M6/M18）
       const windows = applicableWindows(it, node.placeId);
-      if (windows && windows.length > 0 && departureEpoch !== null) {
-        const arrivalLocalSeconds = (departureEpoch + elapsed + SHANGHAI_OFFSET_SECONDS) % 86400;
-        const starts = windows
-          .map((w) => localDaySeconds(w.startLocalTime))
-          .filter((s): s is number => s !== null);
-        if (starts.length > 0) {
-          const openSeconds = Math.min(...starts);
-          if (arrivalLocalSeconds < openSeconds) elapsed += openSeconds - arrivalLocalSeconds;
+      if (windows && departureEpoch !== null && it.travelDate) {
+        const arrivalEpoch = departureEpoch + elapsed;
+        const pushViolation = (text: string) => {
+          if (!violations.includes(text)) violations.push(text);
+        };
+        if (windows.length === 0) {
+          pushViolation(`${displayName(it, id, inserts)} 该日明确不开放`);
+        } else {
+          // 到达是否落在某窗口内；否则等到下一窗口
+          let wait = 0;
+          let inside = false;
+          for (const w of windows) {
+            const startSec = localDaySeconds(w.startLocalTime);
+            let endSec = localDaySeconds(w.endLocalTime);
+            if (startSec === null || endSec === null) continue;
+            const startEpoch = epochOfLocal(it.travelDate, w.startLocalTime)!;
+            let endEpoch = epochOfLocal(it.travelDate, w.endLocalTime)!;
+            if (endEpoch <= startEpoch) endEpoch += 86400;
+            if (arrivalEpoch >= startEpoch && arrivalEpoch < endEpoch) {
+              inside = true;
+              break;
+            }
+            if (arrivalEpoch < startEpoch) {
+              wait = startEpoch - arrivalEpoch;
+              break;
+            }
+          }
+          if (!inside && wait === 0) {
+            pushViolation(`${displayName(it, id, inserts)} 可能超过闭门时间`);
+          }
+          if (wait > 0) elapsed += wait;
+          // 离开时刻覆盖检查
+          if (node.visitSeconds !== null && (inside || wait > 0)) {
+            const leave = arrivalEpoch + wait + node.visitSeconds;
+            const covered = windows.some((w) => {
+              const s = epochOfLocal(it.travelDate!, w.startLocalTime);
+              let e = epochOfLocal(it.travelDate!, w.endLocalTime);
+              if (s === null || e === null) return false;
+              if (e <= s) e += 86400;
+              return leave >= s && leave <= e;
+            });
+            if (!covered) {
+              pushViolation(`${displayName(it, id, inserts)} 可能超过闭门时间`);
+            }
+          }
         }
       }
       if (node.visitSeconds === null) {
@@ -376,8 +422,16 @@ function simulate(
       }
       for (const ev of visitWalkEvents(node)) {
         if ('restSeat' in ev) {
-          const r = classifyRest(ev.restSeat, ev.restSeconds, null);
+          const r = classifyRest(
+            ev.restSeat,
+            ev.restReviewState as never,
+            ev.restSeconds,
+            cons.minRestSeconds,
+          );
           if (r.type !== 'noReset') closeInterval(true); // 确定分界与可能分界都切分（第 5.3 节）
+        } else if ('otherSeconds' in ev) {
+          // 非步行活动：不进步行统计
+          if (ev.otherSeconds === null) durationIncomplete = true;
         } else {
           addWalk(
             ev.walkSeconds,
@@ -393,7 +447,12 @@ function simulate(
       } else {
         elapsed += node.restSeconds;
       }
-      const r = classifyRest(node.seatFact.value, node.restSeconds, cons.minRestSeconds);
+      const r = classifyRest(
+        node.seatFact.value,
+        node.seatFact.reviewState,
+        node.restSeconds,
+        cons.minRestSeconds,
+      );
       if (r.type !== 'noReset') closeInterval(true);
       if (definiteViolation()) return PRUNNED_OUTCOME;
     }
@@ -404,14 +463,15 @@ function simulate(
   const longest = anyUnknownInterval ? null : exactMax;
   const duration = durationIncomplete ? null : elapsed;
 
-  // 硬限最终判定（文案与 evaluateConstraints 一致，第 5.3 节）
-  const violations: string[] = [];
+  // 硬限最终判定（文案与 evaluateConstraints 一致，第 5.3 节）；开放时间违规已写入 violations
   if (cons.maxTotalWalkSeconds !== null) {
     if (
       (walkTotal !== null && walkTotal > cons.maxTotalWalkSeconds) ||
       (walkTotal === null && walkKnown > cons.maxTotalWalkSeconds)
     ) {
-      violations.push('预计总步行超过你设置的上限');
+      if (!violations.includes('预计总步行超过你设置的上限')) {
+        violations.push('预计总步行超过你设置的上限');
+      }
     }
   }
   if (cons.maxContinuousWalkSeconds !== null) {
@@ -419,12 +479,16 @@ function simulate(
       (longest !== null && longest > cons.maxContinuousWalkSeconds) ||
       (longest === null && lowerBoundMax > cons.maxContinuousWalkSeconds)
     ) {
-      violations.push('最长连续步行超过你设置的上限');
+      if (!violations.includes('最长连续步行超过你设置的上限')) {
+        violations.push('最长连续步行超过你设置的上限');
+      }
     }
   }
   if (cons.latestEndLocal !== null && duration !== null && departureEpoch !== null && latestEndEpoch !== null) {
     if (departureEpoch + elapsed > latestEndEpoch) {
-      violations.push('预计结束时间晚于你设置的最晚结束');
+      if (!violations.includes('预计结束时间晚于你设置的最晚结束')) {
+        violations.push('预计结束时间晚于你设置的最晚结束');
+      }
     }
   }
 

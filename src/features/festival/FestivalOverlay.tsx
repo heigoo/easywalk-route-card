@@ -33,14 +33,29 @@ export function FestivalOverlay({ enabled, celebrateSignal = 0, now }: FestivalO
   const sparksRef = useRef<Spark[]>([]);
   const celebrateRef = useRef(celebrateSignal);
 
-  // 烟花：celebrateSignal 递增即绽放（导出成功等流程节点）
+  // 烟花：celebrateSignal 递增即绽放；features.fireworks 时偶发自动绽放（M31）
   useEffect(() => {
     if (celebrateSignal > celebrateRef.current) {
       const canvas = canvasRef.current;
-      if (canvas && enabled) burstFireworks(canvas.width, canvas.height, sparksRef.current);
+      if (canvas && enabled) {
+        burstFireworks(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height, sparksRef.current);
+      }
     }
     celebrateRef.current = celebrateSignal;
   }, [celebrateSignal, enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const features = festiveFeatures(now ?? new Date());
+    if (!features.fireworks) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    // 节庆窗口内偶发自动绽放
+    const timer = window.setTimeout(() => {
+      const canvas = canvasRef.current;
+      if (canvas) burstFireworks(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height, sparksRef.current);
+    }, 4000 + Math.random() * 8000);
+    return () => window.clearTimeout(timer);
+  }, [enabled, now]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -306,9 +321,13 @@ function drawStar(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: numb
   ctx.fill();
 }
 
-/** 流程庆祝烟花：三簇错落绽放（金/红/星光三色令牌） */
+/**
+ * 流程庆祝烟花：三簇错落绽放（金/红/星光三色令牌）。
+ * w/h 为 CSS 像素宽高；内部按 dpr 换算，避免与 setTransform 双重缩放（M31）。
+ * reduce-motion 时不生成粒子。
+ */
 function burstFireworks(w: number, h: number, sparks: Spark[]) {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const colors = ['hsl(43 92% 54%)', 'hsl(356 72% 54%)', 'hsl(45 90% 82%)'];
   const sites = [
     { x: 0.28, y: 0.3, delay: 0 },
@@ -317,12 +336,13 @@ function burstFireworks(w: number, h: number, sparks: Spark[]) {
   ];
   for (const site of sites) {
     window.setTimeout(() => {
+      // 坐标用 CSS 像素（画布已 setTransform(dpr)）
       const cx = site.x * w;
       const cy = site.y * h;
       const color = colors[Math.floor(Math.random() * colors.length)];
       for (let i = 0; i < 42; i++) {
         const a = (i / 42) * Math.PI * 2;
-        const sp = (1.6 + Math.random() * 1.6) * dpr;
+        const sp = 1.6 + Math.random() * 1.6;
         sparks.push({
           x: cx,
           y: cy,
@@ -331,7 +351,7 @@ function burstFireworks(w: number, h: number, sparks: Spark[]) {
           life: 0,
           maxLife: 1 + Math.random() * 0.5,
           color,
-          size: 1.6 * dpr,
+          size: 1.6,
         });
       }
     }, site.delay * 1000);

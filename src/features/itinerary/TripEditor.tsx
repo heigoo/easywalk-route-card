@@ -156,13 +156,15 @@ export function TripEditor({
 
   const saveLeg = (patch: LegSavePatch) => {
     if (!editingLeg) return;
-    apply((prev) =>
-      setManualLegTime(prev, editingLeg.leg.id, {
+    apply((prev) => {
+      const result = setManualLegTime(prev, editingLeg.leg.id, {
         walkingSeconds: patch.walkingSeconds,
         totalSeconds: patch.totalSeconds,
         mode: patch.mode,
-      }),
-    );
+      });
+      // 拒绝时保持原行程（表单侧已校验），不静默改写
+      return result.ok ? result.itinerary : prev;
+    });
   };
 
   const confirmSkip = () => {
@@ -313,7 +315,7 @@ export function TripEditor({
           unit="次"
           warn={false}
           empty={isEmptyTrip}
-          note={!isEmptyTrip && restNodeCount > stats.plannedRestCount ? '有休息点未计入（座位或时长待核实）' : undefined}
+          note={!isEmptyTrip && restNodeCount > stats.plannedRestCount ? '有休息点座位待核实，未计入' : undefined}
         />
       </div>
 

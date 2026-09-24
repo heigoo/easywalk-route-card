@@ -8,12 +8,11 @@ import {
   addVisitNode,
   createEmptyItinerary,
   setEndpoint,
-  setManualLegTime,
   updateConstraints,
   updateNode,
   upsertPlace,
 } from '../../src/domain/itinerary';
-import { makePlace } from '../helpers';
+import { makePlace, setManualLeg } from '../helpers';
 
 function base() {
   let it = createEmptyItinerary('2026-09-22T00:00:00.000Z');
@@ -25,7 +24,7 @@ function base() {
   it = addVisitNode(it, pB.id, { visitSeconds: 30 * 60, insideWalkSeconds: 5 * 60 });
   const bId = it.nodeOrder[0];
   const leg = Object.values(it.legs).find((l) => l.fromNodeId === it.origin!.id && l.toNodeId === bId)!;
-  it = setManualLegTime(it, leg.id, { walkingSeconds: 10 * 60 });
+  it = setManualLeg(it, leg.id, { walkingSeconds: 10 * 60 });
   return it;
 }
 

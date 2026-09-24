@@ -18,14 +18,13 @@ import {
   restoreLegToMapValue,
   restoreNode,
   setEndpoint,
-  setManualLegTime,
   skipNode,
   updateNode,
   updatePlaceCoordinate,
   upsertNodeFacilityFact,
   upsertPlace,
 } from '../../src/domain/itinerary';
-import { makePlace } from '../helpers';
+import { makePlace, setManualLeg } from '../helpers';
 
 function setup() {
   let it = createEmptyItinerary('2026-09-22T00:00:00.000Z');
@@ -38,7 +37,7 @@ function setup() {
   it = addVisitNode(it, pA.id, { visitSeconds: 30 * 60, insideWalkSeconds: 0 });
   const aId = it.nodeOrder[0];
   const leg = Object.values(it.legs).find((l) => l.fromNodeId === it.origin!.id && l.toNodeId === aId)!;
-  it = setManualLegTime(it, leg.id, { walkingSeconds: 12 * 60 });
+  it = setManualLeg(it, leg.id, { walkingSeconds: 12 * 60 });
   return { it, pO, pA, pB, aId, legId: leg.id };
 }
 
@@ -50,7 +49,7 @@ describe('路段身份（T06）', () => {
     it2 = addVisitNode(it2, pC.id, { visitSeconds: 20 * 60, insideWalkSeconds: 0 });
     const cId = it2.nodeOrder[1];
     const legAC = Object.values(it2.legs).find((l) => l.fromNodeId === aId && l.toNodeId === cId)!;
-    it2 = setManualLegTime(it2, legAC.id, { walkingSeconds: 8 * 60 });
+    it2 = setManualLeg(it2, legAC.id, { walkingSeconds: 8 * 60 });
     expect(it2.legs[legAC.id].state).toBe('ready');
 
     // 重排为 起点→C→A→终点：相邻对 (C,A) 是全新方向
@@ -98,10 +97,11 @@ describe('路段身份（T06）', () => {
 describe('采纳与离线（第 8.5 节）', () => {
   it('采纳地图值后可离线保存；恢复为地图值后回到待获取', () => {
     const { it, aId } = setup();
+    // C3：对尚未填写的 A→终点 写入地图值（O→A 已是手动值，不得覆盖）
     const withAmap = applyMatrixEdges(it, [
       {
-        fromNodeId: it.origin!.id,
-        toNodeId: aId,
+        fromNodeId: aId,
+        toNodeId: it.destination!.id,
         fromCoordinateRevision: 0,
         toCoordinateRevision: 0,
         distanceMeters: 900,
@@ -112,13 +112,17 @@ describe('采纳与离线（第 8.5 节）', () => {
         state: 'ready',
       },
     ]);
-    const amapLeg = Object.values(withAmap.legs)[0];
+    const amapLeg = Object.values(withAmap.legs).find((l) => l.fromNodeId === aId)!;
     expect(amapLeg.durationSource).toBe('amap');
     expect(amapLeg.effectiveWalkingSeconds).toBe(720);
+    // 手动腿未被覆盖
+    const manualLeg = Object.values(withAmap.legs).find((l) => l.fromNodeId === it.origin!.id)!;
+    expect(manualLeg.durationSource).toBe('manual');
+    expect(manualLeg.effectiveWalkingSeconds).toBe(12 * 60);
 
     const { itinerary: adopted, adoptedCount } = adoptAllMapLegs(withAmap, '2026-09-22T02:00:00.000Z');
     expect(adoptedCount).toBe(1);
-    const adoptedLeg = Object.values(adopted.legs)[0];
+    const adoptedLeg = Object.values(adopted.legs).find((l) => l.fromNodeId === aId)!;
     expect(adoptedLeg.durationSource).toBe('adopted');
     expect(adoptedLeg.adoptedAt).toBe('2026-09-22T02:00:00.000Z');
 
@@ -134,8 +138,8 @@ describe('采纳与离线（第 8.5 节）', () => {
     const { it, aId } = setup();
     const withAmap = applyMatrixEdges(it, [
       {
-        fromNodeId: it.origin!.id,
-        toNodeId: aId,
+        fromNodeId: aId,
+        toNodeId: it.destination!.id,
         fromCoordinateRevision: 0,
         toCoordinateRevision: 0,
         distanceMeters: 900,
@@ -148,13 +152,13 @@ describe('采纳与离线（第 8.5 节）', () => {
     ]);
     const { itinerary: adopted } = adoptAllMapLegs(withAmap, '2026-09-22T02:00:00.000Z');
     const factored = applyWalkingFactor(adopted, 2);
-    const legId = Object.keys(factored.legs)[0];
+    const legId = Object.values(factored.legs).find((l) => l.fromNodeId === aId)!.id;
     expect(factored.legs[legId].effectiveWalkingSeconds).toBe(720); // 采纳值锁定时点
 
     const refetched = applyMatrixEdges(factored, [
       {
-        fromNodeId: factored.origin!.id,
-        toNodeId: aId,
+        fromNodeId: aId,
+        toNodeId: it.destination!.id,
         fromCoordinateRevision: 0,
         toCoordinateRevision: 0,
         distanceMeters: 800,
@@ -167,6 +171,25 @@ describe('采纳与离线（第 8.5 节）', () => {
     ]);
     expect(refetched.legs[legId].effectiveWalkingSeconds).toBe(720); // 未被覆盖
     expect(refetched.legs[legId].durationSource).toBe('adopted');
+
+    // 手动腿同样不被新地图值覆盖（C3）
+    const refetchedManual = applyMatrixEdges(factored, [
+      {
+        fromNodeId: it.origin!.id,
+        toNodeId: aId,
+        fromCoordinateRevision: 0,
+        toCoordinateRevision: 0,
+        distanceMeters: 500,
+        rawWalkingSeconds: 400,
+        provider: 'amap',
+        providerApiVersion: 'v5',
+        fetchedAt: '2026-09-22T03:00:00.000Z',
+        state: 'ready',
+      },
+    ]);
+    const stillManual = Object.values(refetchedManual.legs).find((l) => l.fromNodeId === it.origin!.id)!;
+    expect(stillManual.durationSource).toBe('manual');
+    expect(stillManual.effectiveWalkingSeconds).toBe(12 * 60);
   });
 
   it('adoptAllMapLegs 只采纳 amap 路段：manual 与已采纳路段不受影响', () => {
@@ -258,8 +281,8 @@ function setupCandidate(facts: Record<string, Fact<unknown>>) {
     Object.values(it.legs).find((l) => l.fromNodeId === from && l.toNodeId === to)!;
   const legOA = legBetween(it.origin!.id, aId);
   const legAB = legBetween(aId, bId);
-  it = setManualLegTime(it, legOA.id, { walkingSeconds: 12 * 60 });
-  it = setManualLegTime(it, legAB.id, { walkingSeconds: 10 * 60 });
+  it = setManualLeg(it, legOA.id, { walkingSeconds: 12 * 60 });
+  it = setManualLeg(it, legAB.id, { walkingSeconds: 10 * 60 });
   const facilityId = it.facilities.find((f) => f.kind === 'rest-candidate')!.id;
   return { it, oId: it.origin!.id, aId, bId, facilityId, legOA: legOA.id, legAB: legAB.id };
 }

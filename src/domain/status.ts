@@ -103,8 +103,11 @@ export function synthesizeCardStatus(
   if (unverifiedCount > 0) {
     notices.push({ text: `有 ${unverifiedCount} 项设施或开放信息待确认`, severity: 'info' });
   }
+  for (const w of stats.openWaits) {
+    notices.push({ text: w.label, severity: 'warning', anchorBlockId: w.nodeId });
+  }
   for (const c of stats.closingConflicts) {
-    notices.push({ text: c.label, severity: 'warning' });
+    notices.push({ text: c.label, severity: 'warning', anchorBlockId: c.nodeId });
   }
 
   if (knownViolation) return { kind: 'violated', notices };
@@ -112,6 +115,7 @@ export function synthesizeCardStatus(
     missingCount > 0 ||
     unverifiedCount > 0 ||
     stats.closingConflicts.length > 0 ||
+    stats.openWaits.length > 0 ||
     unconfirmedEntrances.length > 0
   ) {
     return { kind: 'draft', notices };
@@ -119,19 +123,32 @@ export function synthesizeCardStatus(
   return { kind: 'complete', notices };
 }
 
-/** 待确认事实数：reported（地图返回未核实）或 unknown 且非用户填写的设施/开放信息 */
+/** 待确认事实数：reported（地图返回未核实）或 unknown 且非用户填写的设施/开放/座位信息 */
 function countUnverifiedFacts(it: Itinerary): number {
   let count = 0;
+  const bump = (v: { value?: unknown; reviewState?: string; sourceType?: string }) => {
+    if (v.reviewState === 'reported') count++;
+    else if (v.reviewState === 'unknown' && v.sourceType !== 'user' && v.value !== null) count++;
+  };
   for (const f of it.facilities) {
     for (const fact of Object.values(f.facts)) {
-      const v = fact as { value?: unknown; reviewState?: string; sourceType?: string };
-      if (v.reviewState === 'reported') count++;
-      else if (v.reviewState === 'unknown' && v.sourceType !== 'user' && v.value !== null) count++;
+      bump(fact as { value?: unknown; reviewState?: string; sourceType?: string });
     }
   }
   for (const place of Object.values(it.places)) {
     if (place.openingDescription.reviewState === 'reported') count++;
     if (place.openingSchedule.reviewState === 'reported') count++;
+  }
+  // M13：座位事实也是待确认项，未核对座位阻止“完整”
+  for (const node of Object.values(it.nodes)) {
+    if (node.skipped) continue;
+    if (node.kind === 'rest') {
+      bump(node.seatFact);
+    } else if (node.activityPlan) {
+      for (const item of node.activityPlan.items) {
+        if (item.kind === 'rest') bump(item.seatFact);
+      }
+    }
   }
   return count;
 }

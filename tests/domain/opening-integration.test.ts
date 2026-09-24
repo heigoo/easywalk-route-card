@@ -10,12 +10,11 @@ import {
   addVisitNode,
   createEmptyItinerary,
   setEndpoint,
-  setManualLegTime,
   upsertPlace,
 } from '../../src/domain/itinerary';
 import { openingScheduleFromText } from '../../src/domain/opening';
 import type { Itinerary } from '../../shared/contracts/domain';
-import { makePlace } from '../helpers';
+import { makePlace, setManualLeg } from '../helpers';
 
 const TRAVEL_DATE = '2026-10-01';
 
@@ -48,8 +47,8 @@ function withOpening(openText: string, departure: string, visitSeconds: number):
   const aId = it.nodeOrder[0];
   const leg = (from: string, to: string) =>
     Object.values(it.legs).find((l) => l.fromNodeId === from && l.toNodeId === to)!;
-  it = setManualLegTime(it, leg(it.origin!.id, aId).id, { walkingSeconds: 15 * 60 });
-  it = setManualLegTime(it, leg(aId, it.destination!.id).id, { walkingSeconds: 10 * 60 });
+  it = setManualLeg(it, leg(it.origin!.id, aId).id, { walkingSeconds: 15 * 60 });
+  it = setManualLeg(it, leg(aId, it.destination!.id).id, { walkingSeconds: 10 * 60 });
   return it;
 }
 

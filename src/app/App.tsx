@@ -3,7 +3,7 @@
  * 手机/平板单列＋编辑预览切换；≥1024px 双列（编辑＋360px 预览）。
  * Task 6：顶栏行程切换器 → 行程列表面板（新建/切换/复制/重命名/删除整份行程记录/重建索引）。
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useItinerary, useItineraryDerived } from './useItinerary';
 import { useIsWide } from './useMediaQuery';
 import { TripEditor } from '../features/itinerary/TripEditor';
@@ -153,7 +153,12 @@ export function App() {
         ? '已保存在本机'
         : '';
 
-  const fileBaseName = `${safeFileName(itinerary.title || '未命名行程')}${itinerary.travelDate ? `-${itinerary.travelDate}` : ''}`;
+  // M29：导出文件名随快照一并冻结（点击导出时捕获，避免与画面不一致）
+  const fileBaseNameRef = useRef(
+    `${safeFileName(itinerary.title || '未命名行程')}${itinerary.travelDate ? `-${itinerary.travelDate}` : ''}`,
+  );
+  const liveFileBaseName = `${safeFileName(itinerary.title || '未命名行程')}${itinerary.travelDate ? `-${itinerary.travelDate}` : ''}`;
+  fileBaseNameRef.current = liveFileBaseName;
 
   // P1 自动规划增强：地图候选与约束规划（第 3.2 节）；默认收起，不影响 P0 主流程
   const planning = usePlanning(itinerary, apply);
@@ -184,7 +189,8 @@ export function App() {
       <ExportPanel
         vm={cardViewModel}
         statusKind={cardStatus.kind}
-        fileBaseName={fileBaseName}
+        fileBaseName={fileBaseNameRef.current}
+        freezeFileName={() => fileBaseNameRef.current}
         trigger={exportSignal}
         showTriggerButton={isWide}
         onExported={() => setCelebrateSignal((n) => n + 1)}
@@ -267,7 +273,7 @@ export function App() {
             aria-pressed={festiveOn}
             title={festiveOn ? '关闭节庆动画' : '开启节庆动画'}
           >
-            {festiveOn ? '🎑 节庆动画开' : '节庆动画关'}
+            {festiveOn ? '节庆动画开' : '节庆动画关'}
           </button>
         </div>
       </header>
@@ -277,7 +283,7 @@ export function App() {
           <button
             type="button"
             className={`${styles.tab} ${view === 'edit' ? styles.active : ''}`}
-            onClick={() => setView('edit')}
+            onClick={goEdit}
             aria-pressed={view === 'edit'}
           >
             编辑行程
@@ -319,7 +325,7 @@ export function App() {
               disabled={cardStatus.kind === 'blocked'}
               onClick={() => setExportSignal((n) => n + 1)}
             >
-              {cardStatus.kind === 'blocked' ? '无法导出（请先完善行程）' : cardStatus.kind === 'complete' ? '导出图片' : '导出草稿'}
+              {cardStatus.kind === 'blocked' ? '无法导出' : cardStatus.kind === 'complete' ? '导出图片' : '导出草稿'}
             </button>
           )}
         </div>

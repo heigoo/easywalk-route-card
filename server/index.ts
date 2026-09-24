@@ -21,11 +21,19 @@ export interface BuildServerOptions {
 }
 
 export async function buildServer(overrides: BuildServerOptions = {}): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  // M38：保留最小结构化日志（不打印 Key/完整上游 URL）
+  const app = Fastify({
+    logger: {
+      level: process.env.NODE_ENV === 'test' ? 'silent' : 'warn',
+      redact: ['req.headers.authorization', 'req.headers.cookie'],
+    },
+  });
 
   // 全局错误处理：统一映射为错误契约（第 7.1 节），不泄露堆栈与凭据
+  // M38：用户可见文案走中文白名单；细节只进诊断字段
   app.setErrorHandler((error, request, reply) => {
     const requestId = request.id;
+    request.log.error({ requestId, code: error.code, statusCode: error.statusCode }, 'api error');
     if (error.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
       return reply
         .status(400)
@@ -44,7 +52,7 @@ export async function buildServer(overrides: BuildServerOptions = {}): Promise<F
     }
     return reply
       .status(statusCode)
-      .send({ code: 'INVALID_INPUT', message: error.message || '请求不合法', retryable: false, fieldErrors: [], requestId });
+      .send({ code: 'INVALID_INPUT', message: '请求不合法', retryable: false, fieldErrors: [], requestId });
   });
 
   app.setNotFoundHandler((request, reply) => {

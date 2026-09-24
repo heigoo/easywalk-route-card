@@ -17,14 +17,37 @@ let envFileLoaded = false;
 /**
  * 本地开发加载 .env（该文件已被 Git 忽略，示例见 .env.example）。
  * 仅在关键变量缺失时尝试，且不覆盖已存在的环境变量，避免意外覆盖部署配置。
+ * Node <20.12 无 process.loadEnvFile，用无依赖解析回退（M21）。
  */
 function loadLocalEnvOnce(): void {
   if (envFileLoaded) return;
   envFileLoaded = true;
   if (process.env.AMAP_WEB_SERVICE_KEY) return;
-  if (typeof process.loadEnvFile !== 'function') return;
   try {
-    process.loadEnvFile('.env');
+    if (typeof process.loadEnvFile === 'function') {
+      process.loadEnvFile('.env');
+      return;
+    }
+  } catch {
+    // 继续走回退解析
+  }
+  try {
+    const { readFileSync } = require('node:fs') as typeof import('node:fs');
+    const text = readFileSync('.env', 'utf8');
+    for (const line of text.split(/\r?\n/)) {
+      const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line.trim());
+      if (!m) continue;
+      const key = m[1];
+      if (process.env[key]) continue;
+      let v = m[2].trim();
+      if (
+        (v.startsWith('"') && v.endsWith('"') && v.length >= 2) ||
+        (v.startsWith("'") && v.endsWith("'") && v.length >= 2)
+      ) {
+        v = v.slice(1, -1);
+      }
+      process.env[key] = v;
+    }
   } catch {
     // 没有 .env 文件或无法读取时静默跳过：未配置 Key 由路由返回 AMAP_NOT_CONFIGURED
   }
