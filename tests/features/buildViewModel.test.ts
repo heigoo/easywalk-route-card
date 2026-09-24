@@ -7,17 +7,25 @@ import type { Fact, OpeningSchedule, PlaceRef } from '../../shared/contracts/dom
 import { unknownFact } from '../../shared/contracts/domain';
 import { computeStats, evaluateConstraints } from '../../src/domain/compute';
 import { synthesizeCardStatus } from '../../src/domain/status';
-import { updateNode } from '../../src/domain/itinerary';
+import { convertRestCandidateToRestNode, updateNode } from '../../src/domain/itinerary';
 import { buildCardViewModel } from '../../src/features/route-card/buildViewModel';
 import type { NodeBlock } from '../../src/features/route-card/viewModel';
+import { detourTripleOf, type DetourCompareMap } from '../../src/features/planning/useDetourCompare';
 import { buildUnifiedSample } from '../helpers';
 import { SAMPLE } from '../helpers';
 
-function vmFor(it: ReturnType<typeof buildUnifiedSample>) {
+function vmFor(it: ReturnType<typeof buildUnifiedSample>, detourCompares?: DetourCompareMap) {
   const stats = computeStats(it);
   const verdicts = evaluateConstraints(it, stats);
   const status = synthesizeCardStatus(it, stats, verdicts);
-  return buildCardViewModel({ itinerary: it, stats, verdicts, status, now: '2026-09-22T04:00:00.000Z' });
+  return buildCardViewModel({
+    itinerary: it,
+    stats,
+    verdicts,
+    status,
+    detourCompares: detourCompares ?? {},
+    now: '2026-09-22T04:00:00.000Z',
+  });
 }
 
 describe('CardViewModel（第 10.2 节）', () => {
@@ -270,5 +278,111 @@ describe('设施候选提醒（Task 3 / M-R03）', () => {
       open: candidateFact('8:00-18:00', true),
     });
     expect(checkedTexts).toContain('厕所：公园东门厕所（你已核对：8:00-18:00）');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 3 / R-B：候选转休息点后的卡片一致性
+// ---------------------------------------------------------------------------
+
+describe('候选转休息点后的卡片一致性（Task 3 / R-B）', () => {
+  it('转换后“歇脚点候选”提醒随记录移除消失，休息点行按既有规则显示座位状态', () => {
+    const base = buildUnifiedSample();
+    const aId = base.nodeOrder[0];
+    const withCandidate = {
+      ...base,
+      facilities: [
+        ...base.facilities,
+        {
+          id: 'f-convert',
+          kind: 'rest-candidate' as const,
+          placeId: base.nodes[aId].placeId,
+          target: { type: 'node' as const, nodeId: aId },
+          facts: {
+            name: candidateFact('长椅休息区', true),
+            seat: candidateFact(true, true),
+          },
+        },
+      ],
+    };
+    const before = vmFor(withCandidate);
+    const beforeNode = before.blocks.find(
+      (b): b is NodeBlock => b.kind === 'node' && b.titleText === '示例景点A',
+    );
+    expect(beforeNode?.notices.map((n) => n.text)).toContain('歇脚点候选：长椅休息区（你已核对：可坐）');
+
+    const { itinerary: after } = convertRestCandidateToRestNode(withCandidate, 'f-convert', aId);
+    const vm = vmFor(after);
+    // 原候选提醒消失（记录已迁移，不重复提醒）
+    const allNotices = vm.blocks.flatMap((b) => (b.kind === 'node' ? b.notices.map((n) => n.text) : []));
+    expect(allNotices.some((t) => t.includes('歇脚点候选'))).toBe(false);
+    // 代之以常规休息点行：名称来自候选；座位已核对（true）不再提示“待确认”
+    const restBlock = vm.blocks.find((b): b is NodeBlock => b.kind === 'node' && b.titleText === '长椅休息区');
+    expect(restBlock).toBeDefined();
+    expect(restBlock!.role).toBe('rest');
+    expect(restBlock!.badges.map((b) => b.text)).toContain('休息点');
+    expect(restBlock!.notices.some((n) => n.text === '是否有座位待确认')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 4 / R-D：歇脚绕行对比（会话内对照，不落盘）
+// ---------------------------------------------------------------------------
+
+/** 统一样例里休息点的提醒文本（休息点夹在 A、B 之间，两段 8+10=18 分钟） */
+function restNotices(
+  it: ReturnType<typeof buildUnifiedSample>,
+  compares: DetourCompareMap,
+): string[] {
+  const vm = vmFor(it, compares);
+  const node = vm.blocks.find((b): b is NodeBlock => b.kind === 'node' && b.titleText === '示例休息点');
+  return (node?.notices ?? []).map((n) => n.text);
+}
+
+describe('歇脚绕行对比（Task 4 / R-D）', () => {
+  const base = buildUnifiedSample();
+  const restId = base.nodeOrder[1];
+  const key = detourTripleOf(base, restId)!.key;
+
+  it('对照可得且多走：显示“歇脚绕行：比直达多走约 X 分钟”并注明按当前步行倍数估算', () => {
+    // 两段 8+10=18 分钟、直达 15 分钟 → 多走约 3 分钟（分钟向上取整）
+    const texts = restNotices(base, { [key]: { status: 'ready', directRawWalkingSeconds: 15 * 60 } });
+    expect(texts).toContain('歇脚绕行：比直达多走约 3 分钟（按当前步行倍数估算）');
+  });
+
+  it('差值≤0：显示“与直达相当/更近”，不夸大绕行成本', () => {
+    const texts = restNotices(base, { [key]: { status: 'ready', directRawWalkingSeconds: 20 * 60 } });
+    expect(texts).toContain('歇脚绕行：与直达相当/更近（按当前步行倍数估算）');
+  });
+
+  it('口径固化：直达原始时长按同一 walkingFactor 折算后再比较', () => {
+    // 倍数 2：两段手动值按当前展示口径不变（18 分钟），直达 15 分钟折算为 30 分钟 → 判为相当/更近
+    const slower = { ...base, constraints: { ...base.constraints, walkingFactor: 2 } };
+    const texts = restNotices(slower, { [key]: { status: 'ready', directRawWalkingSeconds: 15 * 60 } });
+    expect(texts).toContain('歇脚绕行：与直达相当/更近（按当前步行倍数估算）');
+  });
+
+  it('对照失败/不可达/未取得：一律“绕行对比待补充”，绝不用直线距离或估算冒充', () => {
+    for (const compares of [
+      { [key]: { status: 'failed' as const } },
+      { [key]: { status: 'unreachable' as const } },
+      {},
+    ]) {
+      const texts = restNotices(base, compares);
+      expect(texts).toContain('绕行对比待补充');
+      expect(texts.some((t) => /多走|相当|直线/.test(t))).toBe(false);
+    }
+  });
+
+  it('缺坐标（下一站无坐标）：待补充，不显示任何对比数值', () => {
+    const bId = base.nodeOrder[2];
+    const pB = base.places[base.nodes[bId].placeId];
+    const noCoord = {
+      ...base,
+      places: { ...base.places, [pB.id]: { ...pB, location: null } },
+    };
+    const texts = restNotices(noCoord, { [key]: { status: 'ready', directRawWalkingSeconds: 15 * 60 } });
+    expect(texts).toContain('绕行对比待补充');
+    expect(texts.some((t) => /多走|相当|直线/.test(t))).toBe(false);
   });
 });

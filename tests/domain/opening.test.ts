@@ -101,9 +101,162 @@ describe('openingScheduleFromText：单段窗口或 null', () => {
   });
 
   it('非法文本与空串一律 null，不编造窗口', () => {
-    expect(openingScheduleFromText('周一至周五 08:00-18:00', '2026-10-01', 'Asia/Shanghai')).toBeNull();
+    // 周一至周五未覆盖周六（2026-10-03）出游日：未被明确覆盖 → 不写结构化时段
+    expect(openingScheduleFromText('周一至周五 08:00-18:00', '2026-10-03', 'Asia/Shanghai')).toBeNull();
     expect(openingScheduleFromText('22:00-02:00', '2026-10-01', 'Asia/Shanghai')).toBeNull();
     expect(openingScheduleFromText('', '2026-10-01', 'Asia/Shanghai')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R-C：分日文法（严格枚举）按出游日期求值
+// 参考星期：2026-10-01 周四、2026-10-03 周六、2026-10-04 周日、2026-09-28 周一、2026-09-30 周三
+// ---------------------------------------------------------------------------
+
+describe('openingScheduleFromText：分日文法覆盖出游日期 → 正确 windows', () => {
+  it('固定区间：周一至周五 覆盖周四出游日 → 单段窗口', () => {
+    expect(openingScheduleFromText('周一至周五 08:00-18:00', '2026-10-01', 'Asia/Shanghai')).toEqual({
+      applicableDate: '2026-10-01',
+      timezone: 'Asia/Shanghai',
+      windows: [{ startLocalTime: '08:00', endLocalTime: '18:00' }],
+    });
+  });
+
+  it('单日日期组：周六 覆盖周六出游日', () => {
+    expect(openingScheduleFromText('周六 09:00-17:00', '2026-10-03', 'Asia/Shanghai')).toEqual({
+      applicableDate: '2026-10-03',
+      timezone: 'Asia/Shanghai',
+      windows: [{ startLocalTime: '09:00', endLocalTime: '17:00' }],
+    });
+  });
+
+  it('逗号列表（含全角逗号）：周一,周三 仅覆盖周一/周三', () => {
+    for (const text of ['周一,周三 08:00-18:00', '周一，周三 08:00-18:00']) {
+      for (const date of ['2026-09-28', '2026-09-30']) {
+        expect(openingScheduleFromText(text, date, 'Asia/Shanghai')).toEqual({
+          applicableDate: date,
+          timezone: 'Asia/Shanghai',
+          windows: [{ startLocalTime: '08:00', endLocalTime: '18:00' }],
+        });
+      }
+    }
+  });
+
+  it('周末＝周六+周日；周六至周日同义', () => {
+    for (const text of ['周末 09:00-17:00', '周六至周日 09:00-17:00']) {
+      for (const date of ['2026-10-03', '2026-10-04']) {
+        expect(openingScheduleFromText(text, date, 'Asia/Shanghai')?.windows).toEqual([
+          { startLocalTime: '09:00', endLocalTime: '17:00' },
+        ]);
+      }
+    }
+  });
+
+  it('全周词：每天/每日/周一至周日/全年 覆盖任意出游日', () => {
+    for (const prefix of ['每天', '每日', '周一至周日', '全年']) {
+      expect(
+        openingScheduleFromText(`${prefix} 08:00-18:00`, '2026-10-04', 'Asia/Shanghai')?.windows,
+      ).toEqual([{ startLocalTime: '08:00', endLocalTime: '18:00' }]);
+    }
+  });
+
+  it('多时段：同一日期组内多个 window（, 与 、 分隔均支持）', () => {
+    for (const text of ['周末 09:00-17:00,20:00-21:30', '周末 09:00-17:00、20:00-21:30']) {
+      expect(openingScheduleFromText(text, '2026-10-04', 'Asia/Shanghai')?.windows).toEqual([
+        { startLocalTime: '09:00', endLocalTime: '17:00' },
+        { startLocalTime: '20:00', endLocalTime: '21:30' },
+      ]);
+    }
+  });
+
+  it('多段并列（; / ； / 换行分隔）按出游日取对应日期组', () => {
+    for (const sep of [';', '；', '\n']) {
+      const text = `周一至周五 08:00-18:00${sep}周六 09:00-17:00`;
+      expect(openingScheduleFromText(text, '2026-10-03', 'Asia/Shanghai')?.windows).toEqual([
+        { startLocalTime: '09:00', endLocalTime: '17:00' },
+      ]);
+      expect(openingScheduleFromText(text, '2026-10-01', 'Asia/Shanghai')?.windows).toEqual([
+        { startLocalTime: '08:00', endLocalTime: '18:00' },
+      ]);
+    }
+  });
+
+  it('纯全周单段文本兼容既有解析', () => {
+    expect(openingScheduleFromText('08:00-18:30', '2026-10-01', 'Asia/Shanghai')).toEqual({
+      applicableDate: '2026-10-01',
+      timezone: 'Asia/Shanghai',
+      windows: [{ startLocalTime: '08:00', endLocalTime: '18:30' }],
+    });
+  });
+});
+
+describe('openingScheduleFromText：休息/不开放 → windows 空数组（明确不开放）', () => {
+  it('周六 休息 覆盖周六 → windows: []', () => {
+    expect(openingScheduleFromText('周六 休息', '2026-10-03', 'Asia/Shanghai')).toEqual({
+      applicableDate: '2026-10-03',
+      timezone: 'Asia/Shanghai',
+      windows: [],
+    });
+  });
+
+  it('周末 不开放 覆盖周日 → windows: []', () => {
+    expect(openingScheduleFromText('周末 不开放', '2026-10-04', 'Asia/Shanghai')?.windows).toEqual([]);
+  });
+
+  it('周一至周五开放;周末休息：周日 → 不开放，周四 → 开放时段', () => {
+    const text = '周一至周五 08:00-18:00;周末 休息';
+    expect(openingScheduleFromText(text, '2026-10-04', 'Asia/Shanghai')?.windows).toEqual([]);
+    expect(openingScheduleFromText(text, '2026-10-01', 'Asia/Shanghai')?.windows).toEqual([
+      { startLocalTime: '08:00', endLocalTime: '18:00' },
+    ]);
+  });
+
+  it('每天 不开放：任意出游日 → windows: []', () => {
+    expect(openingScheduleFromText('每天 不开放', '2026-10-01', 'Asia/Shanghai')?.windows).toEqual([]);
+  });
+});
+
+describe('openingScheduleFromText：出游日未被覆盖或日期非法 → null（不编造）', () => {
+  it('周一至周五 未覆盖周六出游日 → null', () => {
+    expect(openingScheduleFromText('周一至周五 08:00-18:00', '2026-10-03', 'Asia/Shanghai')).toBeNull();
+  });
+
+  it('并列段均未覆盖出游日 → null', () => {
+    expect(
+      openingScheduleFromText('周一至周五 08:00-18:00;周六 09:00-17:00', '2026-10-04', 'Asia/Shanghai'),
+    ).toBeNull();
+  });
+
+  it('applicableDate 非法或不存在 → null（即使文本可解析）', () => {
+    for (const date of ['2026-02-30', '2026-13-01', '2026-1-1', '2026-10-01 ', 'not-a-date', '']) {
+      expect(openingScheduleFromText('每天 08:00-18:00', date, 'Asia/Shanghai')).toBeNull();
+    }
+  });
+});
+
+describe('openingScheduleFromText：混合非法形态整体拒绝（任一子段不可解析 → 整体 null）', () => {
+  it.each([
+    ['跨零点段混入分日文本', '周一至周五 08:00-18:00;周六 22:00-02:00'],
+    ['多时段中一段跨零点', '周六 09:00-17:00,22:00-01:00'],
+    ['24:00 不是合法时刻', '周一至周五 08:00-24:00'],
+    ['乱序（结束早于开始）', '周一 18:00-08:00'],
+    ['零长度时段', '周一 08:00-08:00'],
+    ['词表外前缀', '每周一至周五 08:00-18:00'],
+    ['词表外日期组', '周一至周五 09:00-17:00;节假日 09:00-10:00'],
+    ['未列区间', '周二至周四 08:00-18:00'],
+    ['词表外状态词', '周一 不营业'],
+    ['星期X 写法不在词表', '星期一 08:00-18:00'],
+    ['日期组后无状态也无时段', '周一至周五'],
+    ['附加说明混入', '周一至周五 08:00-18:00 仅供参考'],
+    ['重复覆盖同一天（跨日期组）', '每天 08:00-18:00;周六 09:00-10:00'],
+    ['重复覆盖同一天（开放+休息）', '周一至周五 08:00-18:00;周三 休息'],
+    ['重复覆盖同一天（列表内重复）', '周一,周一 08:00-18:00'],
+    ['裸时段混入分日文本（前置）', '08:00-18:00;周六 09:00-17:00'],
+    ['裸时段混入分日文本（后置）', '周六 09:00-17:00;20:00-21:00'],
+    ['无日期组的多时段裸文本', '8:00-12:00,13:30-17:30'],
+    ['空子段（多余分隔符）', '周一至周五 08:00-18:00;'],
+  ])('%s：%s → null', (_label, text) => {
+    expect(openingScheduleFromText(text, '2026-10-01', 'Asia/Shanghai')).toBeNull();
   });
 });
 

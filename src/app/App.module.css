@@ -33,6 +33,143 @@
   padding-top: var(--sp-2);
 }
 
+.headerSide {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
+}
+
+.tripSwitcherBtn {
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius-input);
+  border: 1px solid var(--control-border);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: var(--font-small);
+}
+
+/* 行程列表面板（Task 6） */
+.tripPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.tripToolbar {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.tripPrimaryBtn {
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  border: none;
+  border-radius: var(--radius-input);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+
+.tripBtn {
+  min-height: 44px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-input);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: var(--font-small);
+}
+
+.tripDanger {
+  color: var(--warn-text);
+  border-color: var(--warn-text);
+}
+
+.tripNotice {
+  color: var(--warn-text);
+  font-size: var(--font-small);
+}
+
+.tripEmpty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-small);
+}
+
+.tripList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.tripRow {
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-card);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.tripRowMain {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.tripName {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tripCurrentTag {
+  color: var(--primary);
+  font-size: var(--font-small);
+}
+
+.tripMeta {
+  color: var(--text-muted);
+  font-size: var(--font-small);
+}
+
+.tripActions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.renameRow {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.renameLabel {
+  font-size: var(--font-small);
+  color: var(--text-secondary);
+}
+
+.renameRow input {
+  min-height: 44px;
+  flex: 1;
+  min-width: 120px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-input);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: var(--font-body);
+}
+
 .saveError {
   color: var(--warn-text);
 }

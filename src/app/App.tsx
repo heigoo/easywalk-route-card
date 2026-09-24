@@ -1,6 +1,7 @@
 /**
  * 应用壳与视图切换（第 3.2 节、需求 4.1、13.8）：
  * 手机/平板单列＋编辑预览切换；≥1024px 双列（编辑＋360px 预览）。
+ * Task 6：顶栏行程切换器 → 行程列表面板（新建/切换/复制/重命名/删除整份行程记录/重建索引）。
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useItinerary, useItineraryDerived } from './useItinerary';
@@ -14,16 +15,86 @@ import { PlanningPanel } from '../features/planning/PlanningPanel';
 import { usePlanning } from '../features/planning/usePlanning';
 import { addVisitNode, setEndpoint, upsertPlace } from '../domain/itinerary';
 import { safeFileName } from '../domain/format';
+import { Dialog } from '../components/Dialog';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import type { TripIndexItem } from '../storage/local';
 import styles from './App.module.css';
 
 type View = 'edit' | 'preview';
 
+/** 面板内更新时间展示：ISO 时间转“YYYY-MM-DD HH:mm” */
+function formatUpdatedAt(iso: string): string {
+  return iso.includes('T') ? iso.replace('T', ' ').slice(0, 16) : iso;
+}
+
+/** 行程显示名：空标题＝未命名行程 */
+function tripNameOf(item: Pick<TripIndexItem, 'title'>): string {
+  return item.title.trim() || '未命名行程';
+}
+
 export function App() {
   const controller = useItinerary();
-  const { itinerary, apply, replace, saveState, saveError, loadError, resetAll } = controller;
+  const {
+    itinerary,
+    apply,
+    replace,
+    saveState,
+    saveError,
+    loadError,
+    resetAll,
+    trips,
+    tripsError,
+    refreshTrips,
+    createTrip,
+    switchTrip,
+    copyTrip,
+    renameTrip,
+    deleteTrip,
+    rebuildIndex,
+  } = controller;
   const { stats, cardStatus, cardViewModel } = useItineraryDerived(itinerary);
   const isWide = useIsWide();
   const [view, setView] = useState<View>('edit');
+
+  // 行程列表面板（Task 6）：重命名行内编辑、删除二次确认
+  const [tripsOpen, setTripsOpen] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deleting, setDeleting] = useState<TripIndexItem | null>(null);
+
+  const openTrips = useCallback(() => {
+    refreshTrips();
+    setRenamingId(null);
+    setTripsOpen(true);
+  }, [refreshTrips]);
+
+  const closeTrips = useCallback(() => {
+    setTripsOpen(false);
+    setRenamingId(null);
+  }, []);
+
+  const handleCreateTrip = useCallback(() => {
+    if (createTrip()) closeTrips();
+  }, [createTrip, closeTrips]);
+
+  const handleSwitchTrip = useCallback(
+    (id: string) => {
+      if (switchTrip(id)) closeTrips();
+    },
+    [switchTrip, closeTrips],
+  );
+
+  const commitRename = useCallback(
+    (id: string) => {
+      if (renameTrip(id, renameValue)) setRenamingId(null);
+    },
+    [renameTrip, renameValue],
+  );
+
+  const confirmDeleteTrip = useCallback(() => {
+    if (deleting) deleteTrip(deleting.id);
+    setDeleting(null);
+  }, [deleting, deleteTrip]);
 
   /**
    * 输入框仍有焦点时点击按钮：阻止输入框同步失焦。
@@ -158,16 +229,25 @@ export function App() {
           <h1 className={styles.title}>省脚力路线卡</h1>
           <p className={styles.subtitle}>EasyWalk Route Card · 少赶一站，多歇一会</p>
         </div>
-        <div className={styles.saveState} role="status" aria-live="polite">
-          {loadError === 'corrupt' ? (
-            <span className={styles.saveError}>本地数据损坏，已为你开启新行程</span>
-          ) : loadError === 'unsupported' ? (
-            <span className={styles.saveError}>本地数据版本不识别，未覆盖原内容</span>
-          ) : saveError ? (
-            <span className={styles.saveError}>{saveLabel}</span>
-          ) : (
-            <span>{saveLabel}</span>
-          )}
+        <div className={styles.headerSide}>
+          <div className={styles.saveState} role="status" aria-live="polite">
+            {loadError === 'corrupt' ? (
+              <span className={styles.saveError}>本地数据损坏，已为你开启新行程</span>
+            ) : loadError === 'unsupported' ? (
+              <span className={styles.saveError}>本地数据版本不识别，未覆盖原内容</span>
+            ) : loadError === 'indexCorrupt' ? (
+              <span className={styles.saveError}>行程索引损坏，各行程数据仍保留，可在行程列表中重建索引</span>
+            ) : loadError === 'migrationFailed' ? (
+              <span className={styles.saveError}>旧数据迁移未完成，原数据已保留，请重试</span>
+            ) : saveError ? (
+              <span className={styles.saveError}>{saveLabel}</span>
+            ) : (
+              <span>{saveLabel}</span>
+            )}
+          </div>
+          <button type="button" className={styles.tripSwitcherBtn} onClick={openTrips}>
+            行程切换器
+          </button>
         </div>
       </header>
 
@@ -223,6 +303,122 @@ export function App() {
           )}
         </div>
       ) : null}
+
+      {/* 行程列表面板（Task 6）：稳定 role/名称，便于 e2e 定位 */}
+      <Dialog
+        open={tripsOpen}
+        onOpenChange={(open) => (open ? setTripsOpen(true) : closeTrips())}
+        title="行程列表"
+        description="可新建、切换、复制、重命名或删除行程；删除整份行程记录需二次确认，区别于“清空内容”。"
+      >
+        <div className={styles.tripPanel}>
+          <div className={styles.tripToolbar}>
+            <button type="button" className={styles.tripPrimaryBtn} onClick={handleCreateTrip}>
+              新建行程
+            </button>
+            <button type="button" className={styles.tripBtn} onClick={rebuildIndex}>
+              重建行程索引
+            </button>
+          </div>
+          {tripsError ? (
+            <div className={styles.tripNotice} role="alert">
+              {tripsError}
+            </div>
+          ) : null}
+          {trips.length === 0 ? (
+            <p className={styles.tripEmpty}>还没有保存的行程，点击“新建行程”开始。</p>
+          ) : (
+            <ul className={styles.tripList} aria-label="全部行程">
+              {trips.map((item) => {
+                const isCurrent = item.id === itinerary.id;
+                const name = tripNameOf(item);
+                return (
+                  <li key={item.id} className={styles.tripRow} data-trip-id={item.id}>
+                    <div className={styles.tripRowMain}>
+                      <span className={styles.tripName}>{name}</span>
+                      {isCurrent ? <span className={styles.tripCurrentTag}>（当前行程）</span> : null}
+                    </div>
+                    <div className={styles.tripMeta}>
+                      出游日期：{item.travelDate ?? '未定'} · 更新于 {formatUpdatedAt(item.updatedAt)}
+                    </div>
+                    {renamingId === item.id ? (
+                      <div className={styles.renameRow}>
+                        <label className={styles.renameLabel} htmlFor={`rename-${item.id}`}>
+                          新行程名称
+                        </label>
+                        <input
+                          id={`rename-${item.id}`}
+                          type="text"
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitRename(item.id);
+                          }}
+                        />
+                        <button type="button" className={styles.tripBtn} onClick={() => commitRename(item.id)}>
+                          保存名称
+                        </button>
+                        <button type="button" className={styles.tripBtn} onClick={() => setRenamingId(null)}>
+                          取消重命名
+                        </button>
+                      </div>
+                    ) : (
+                      <div className={styles.tripActions}>
+                        <button
+                          type="button"
+                          className={styles.tripBtn}
+                          aria-label={`切换到 ${name}`}
+                          onClick={() => handleSwitchTrip(item.id)}
+                        >
+                          切换
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.tripBtn}
+                          aria-label={`复制 ${name}`}
+                          onClick={() => copyTrip(item.id)}
+                        >
+                          复制
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.tripBtn}
+                          aria-label={`重命名 ${name}`}
+                          onClick={() => {
+                            setRenamingId(item.id);
+                            setRenameValue(item.title);
+                          }}
+                        >
+                          重命名
+                        </button>
+                        <button
+                          type="button"
+                          className={`${styles.tripBtn} ${styles.tripDanger}`}
+                          aria-label={`删除 ${name}`}
+                          onClick={() => setDeleting(item)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </Dialog>
+
+      {/* 删除整份行程记录：二次确认且对象明确（区别于 TripEditor 的“清空内容”） */}
+      <ConfirmDialog
+        open={deleting !== null}
+        title="删除整份行程记录？"
+        description={`将删除整份行程记录《${deleting ? tripNameOf(deleting) : ''}》，此操作不可恢复。`}
+        confirmText="确认删除"
+        danger
+        onConfirm={confirmDeleteTrip}
+        onCancel={() => setDeleting(null)}
+      />
     </div>
   );
 }

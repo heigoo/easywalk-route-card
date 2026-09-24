@@ -349,5 +349,270 @@ describe('附近设施候选流程', () => {
     expect(await screen.findByText('厕所：公园东门厕所（你已核对：8:00-18:00）')).toBeInTheDocument();
     expect(screen.getByText('歇脚点候选：长椅休息区（你已核对：可坐）')).toBeInTheDocument();
     expect(within(card).getByRole('button', { name: '设施备注' })).toBeInTheDocument();
+
+    // 候选无坐标（location:null）：转为休息点后新地点仍无坐标，明确提示“位置待确认”（Task 8）
+    await user.click(screen.getByRole('button', { name: '转为休息点：长椅休息区' }));
+    expect(screen.getByText('已加入路线，请补充新路段步行时间')).toBeInTheDocument();
+    expect(screen.getByText('位置待确认，暂不能自动获取步行数据')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 6（R-A / M-R01）：多行程管理——行程切换器与列表面板
+// ---------------------------------------------------------------------------
+
+/** 通过“添加景点”对话框添加一个景点 */
+async function addPlace(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(screen.getByRole('button', { name: '添加景点' }));
+  await user.type(screen.getByLabelText('名称'), name);
+  await user.click(screen.getByRole('button', { name: '添加' }));
+}
+
+/** 设置当前行程名称（编辑器“行程名称”回车提交） */
+async function setTitle(user: ReturnType<typeof userEvent.setup>, title: string) {
+  await user.type(screen.getByLabelText('行程名称'), `${title}{enter}`);
+}
+
+/** 打开行程列表面板 */
+async function openTripsPanel(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: '行程切换器' }));
+  return screen.getByRole('dialog', { name: '行程列表' });
+}
+
+describe('多行程管理（Task 6）', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('行程切换器打开列表面板：列出全部行程并含新建入口（M-R01）', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await addPlace(user, '面板景点');
+    const panel = await openTripsPanel(user);
+    expect(within(panel).getByRole('button', { name: '新建行程' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: '重建行程索引' })).toBeInTheDocument();
+    // 列出行程（标题/出游日期/更新时间）
+    expect(within(panel).getByText('未命名行程')).toBeInTheDocument();
+    expect(within(panel).getByText(/出游日期：/)).toBeInTheDocument();
+    expect(within(panel).getByText(/更新于/)).toBeInTheDocument();
+    expect(within(panel).getByText('（当前行程）')).toBeInTheDocument();
+  });
+
+  it('新建行程：进入空行程编辑', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await addPlace(user, '旧行程景点');
+    await setTitle(user, '旧行程');
+    const panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '新建行程' }));
+    // 面板收起，进入空行程
+    expect(screen.queryByRole('dialog', { name: '行程列表' })).toBeNull();
+    expect(screen.queryByText('旧行程景点')).not.toBeInTheDocument();
+    expect((screen.getByLabelText('行程名称') as HTMLInputElement).value).toBe('');
+    expect(screen.getByRole('button', { name: '添加景点' })).toBeInTheDocument();
+  });
+
+  it('切换行程：编辑与自动保存作用于切换后行程（M-R01）', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await addPlace(user, '景点一号');
+    await setTitle(user, '行程甲');
+
+    // 新建第二份
+    let panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '新建行程' }));
+    await setTitle(user, '行程乙');
+    await addPlace(user, '景点二号');
+
+    // 切回行程甲：编辑只作用于切换后的行程
+    panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '切换到 行程甲' }));
+    expect(screen.queryByRole('dialog', { name: '行程列表' })).toBeNull();
+    expect((screen.getByLabelText('行程名称') as HTMLInputElement).value).toBe('行程甲');
+    expect(screen.getByText('景点一号')).toBeInTheDocument();
+    expect(screen.queryByText('景点二号')).not.toBeInTheDocument();
+
+    // 在行程甲上编辑（自动保存）
+    await addPlace(user, '景点三号');
+
+    panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '切换到 行程乙' }));
+    expect(screen.getByText('景点二号')).toBeInTheDocument();
+    expect(screen.queryByText('景点三号')).not.toBeInTheDocument();
+
+    // 再切回行程甲：编辑内容随自动保存保留
+    panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '切换到 行程甲' }));
+    expect(screen.getByText('景点一号')).toBeInTheDocument();
+    expect(screen.getByText('景点三号')).toBeInTheDocument();
+  });
+
+  it('复制行程：内容一致且为新 id', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await addPlace(user, '复制景点');
+    const panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '复制 未命名行程' }));
+
+    // 两条记录并存：同名同内容、id 不同
+    expect(within(panel).getAllByText('未命名行程')).toHaveLength(2);
+    const rows = within(panel).getAllByRole('listitem');
+    expect(rows).toHaveLength(2);
+    const ids = rows.map((r) => r.getAttribute('data-trip-id'));
+    expect(new Set(ids).size).toBe(2);
+
+    // 复制不改变当前行程；副本内容一致
+    const copyRow = rows.find((r) => !r.textContent!.includes('（当前行程）'))!;
+    const currentRow = rows.find((r) => r.textContent!.includes('（当前行程）'))!;
+    expect(currentRow.getAttribute('data-trip-id')).not.toBe(copyRow.getAttribute('data-trip-id'));
+    await user.click(within(copyRow).getByRole('button', { name: '切换到 未命名行程' }));
+    expect(screen.getByText('复制景点')).toBeInTheDocument();
+  });
+
+  it('重命名行程：保存后即时生效', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await addPlace(user, '重命名景点');
+    const panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '重命名 未命名行程' }));
+    await user.clear(screen.getByLabelText('新行程名称'));
+    await user.type(screen.getByLabelText('新行程名称'), '两日游计划');
+    await user.click(within(panel).getByRole('button', { name: '保存名称' }));
+    // 列表即时更新
+    expect(within(panel).getByText('两日游计划')).toBeInTheDocument();
+    expect(within(panel).queryByText('未命名行程')).toBeNull();
+    // 当前行程即时生效（编辑器“行程名称”同步）
+    await user.click(within(panel).getByRole('button', { name: '关闭' }));
+    expect((screen.getByLabelText('行程名称') as HTMLInputElement).value).toBe('两日游计划');
+  });
+
+  it('删除行程记录：二次确认且对象明确，取消不删、确认才删（M-R01）', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await addPlace(user, '甲景点');
+    await setTitle(user, '行程甲');
+    let panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '新建行程' }));
+    await setTitle(user, '行程乙');
+    await addPlace(user, '乙景点');
+    // 切回行程甲，删除对象是非当前行程
+    panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '切换到 行程甲' }));
+
+    panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '删除 行程乙' }));
+    // 二次确认：对象明确
+    expect(screen.getByText('删除整份行程记录？')).toBeInTheDocument();
+    expect(screen.getByText('将删除整份行程记录《行程乙》，此操作不可恢复。')).toBeInTheDocument();
+
+    // 取消：不删
+    await user.click(screen.getByRole('button', { name: '取消' }));
+    expect(within(panel).getByRole('button', { name: '删除 行程乙' })).toBeInTheDocument();
+
+    // 确认：删除整份行程记录
+    await user.click(within(panel).getByRole('button', { name: '删除 行程乙' }));
+    await user.click(screen.getByRole('button', { name: '确认删除' }));
+    expect(within(panel).queryByRole('button', { name: '删除 行程乙' })).toBeNull();
+    expect(within(panel).getByRole('button', { name: '删除 行程甲' })).toBeInTheDocument();
+    // 当前行程不受影响
+    await user.click(within(panel).getByRole('button', { name: '关闭' }));
+    expect(screen.getByText('甲景点')).toBeInTheDocument();
+    expect(screen.queryByText('乙景点')).not.toBeInTheDocument();
+  });
+
+  it('删除当前行程后自动切换到另一条；删完进入空行程编辑并保留新建入口（6.3）', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await addPlace(user, '甲景点');
+    await setTitle(user, '行程甲');
+    let panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '新建行程' }));
+    await setTitle(user, '行程乙');
+
+    // 删除当前的行程乙：自动切到行程甲
+    panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '删除 行程乙' }));
+    await user.click(screen.getByRole('button', { name: '确认删除' }));
+    expect(within(panel).getByText('行程甲')).toBeInTheDocument();
+    expect(within(panel).getByText('（当前行程）')).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: '关闭' }));
+    expect(screen.getByText('甲景点')).toBeInTheDocument();
+
+    // 删除最后一份：进入空行程编辑，新建入口仍在
+    panel = await openTripsPanel(user);
+    await user.click(within(panel).getByRole('button', { name: '删除 行程甲' }));
+    await user.click(screen.getByRole('button', { name: '确认删除' }));
+    expect(within(panel).getByText('还没有保存的行程，点击“新建行程”开始。')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: '新建行程' })).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: '关闭' }));
+    expect(screen.queryByText('甲景点')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '添加景点' })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 3（R-B）：歇脚点候选一键转休息点
+// ---------------------------------------------------------------------------
+
+describe('歇脚点候选一键转休息点（Task 3 / R-B）', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('一键转换：插入该站之后、持久提示补充路段、候选提醒消失，并可跳过/恢复', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await addPlace(user, '示例景点甲');
+    await addPlace(user, '示例景点乙');
+
+    // 在示例景点甲上手动记录歇脚点候选（无需网络）
+    const cardA = screen.getByRole('article', { name: '示例景点甲' });
+    await user.click(within(cardA).getByRole('button', { name: '设施备注' }));
+    await user.type(screen.getByLabelText('名称'), '长椅休息区');
+    await user.selectOptions(screen.getByLabelText('是否可坐'), 'yes');
+    await user.click(screen.getByRole('button', { name: '确认修改' }));
+
+    // 设施摘要条目＋一键转换入口
+    expect(await screen.findByText('歇脚点候选：长椅休息区（你已核对：可坐）')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '转为休息点：长椅休息区' }));
+
+    // 持久提示（不是一闪而过的 Toast）
+    expect(screen.getByText('已加入路线，请补充新路段步行时间')).toBeInTheDocument();
+    // 转换出的地点没有坐标：显式提示，不用估算冒充
+    expect(screen.getByText('位置待确认，暂不能自动获取步行数据')).toBeInTheDocument();
+    // 原设施记录随迁移移除：候选提醒消失
+    expect(screen.queryByText(/歇脚点候选/)).not.toBeInTheDocument();
+
+    // 新休息点插入在指定站点之后、下一站之前
+    const restCard = screen.getByRole('article', { name: '长椅休息区' });
+    const cardB = screen.getByRole('article', { name: '示例景点乙' });
+    expect(cardA.compareDocumentPosition(restCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(restCard.compareDocumentPosition(cardB) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // 新节点遵循既有跳过/恢复规则（资料保留）
+    await user.click(within(restCard).getByRole('button', { name: '跳过此站' }));
+    expect(screen.getByText('已跳过（资料保留）')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '恢复' }));
+    expect(screen.getByRole('article', { name: '长椅休息区' })).toBeInTheDocument();
+    // 提示持续可见（持久提示）
+    expect(screen.getByText('已加入路线，请补充新路段步行时间')).toBeInTheDocument();
+  });
+
+  it('候选缺名称：转换入口标“未命名歇脚点”，转换后提示位置待确认', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await addPlace(user, '示例景点甲');
+
+    // 只核对座位、不填名称：候选仍可转换
+    const cardA = screen.getByRole('article', { name: '示例景点甲' });
+    await user.click(within(cardA).getByRole('button', { name: '设施备注' }));
+    await user.selectOptions(screen.getByLabelText('是否可坐'), 'yes');
+    await user.click(screen.getByRole('button', { name: '确认修改' }));
+    expect(await screen.findByText('歇脚点候选（你已核对：可坐）')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '转为休息点：未命名歇脚点' }));
+    expect(screen.getByRole('article', { name: '未命名歇脚点' })).toBeInTheDocument();
+    expect(screen.getByText('已加入路线，请补充新路段步行时间')).toBeInTheDocument();
+    expect(screen.getByText('位置待确认，暂不能自动获取步行数据')).toBeInTheDocument();
   });
 });

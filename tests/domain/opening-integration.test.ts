@@ -64,6 +64,13 @@ describe('开放时间进入计算链路（R-A2 集成）', () => {
     expect(stats.closingConflicts).toHaveLength(0);
   });
 
+  it('分日文本按出游日求值（周一至周五覆盖 2026-10-01 周四）：等待开门同样计入总用时', () => {
+    const it = withOpening('周一至周五 08:30-17:00', '08:00', 60 * 60);
+    const stats = computeStats(it);
+    // 15 步行 + 15 等待开门 + 60 停留 + 10 步行 = 100 分钟
+    expect(stats.totalDurationSeconds).toBe(100 * 60);
+  });
+
   it('到达已开门：不产生等待', () => {
     const it = withOpening('每日 08:30-17:00', '09:00', 60 * 60);
     const stats = computeStats(it);

@@ -2,6 +2,7 @@
  * 景点节点卡（需求 13.7）：序号、名称、停留/园内步行、提醒、操作。
  * 必去/可选/已跳过状态用文字+徽标共同表达，不只靠颜色。
  * 设施摘要（Task 3）：显示已记录的厕所/歇脚点候选（名称＋属性状态），措辞含“候选”。
+ * 歇脚点候选可一键转为休息点（Task 3 / R-B）：转换入口随候选记录走，记录迁移后自动消失。
  */
 import type { Fact, FacilityRecord, PlaceRef, RouteNode } from '../../../shared/contracts/domain';
 import { ceilMinutes } from '../../domain/format';
@@ -12,6 +13,8 @@ export interface RouteNodeCardProps {
   place: PlaceRef | undefined;
   /** 该节点已记录的设施记录（厕所/歇脚点候选摘要用） */
   facilities?: FacilityRecord[];
+  /** 歇脚点候选一键转休息点（Task 3 / R-B）；未提供时不显示转换入口 */
+  onConvertRestCandidate?: (facilityId: string) => void;
   index: number | null;
   isFirst: boolean;
   isLast: boolean;
@@ -55,10 +58,25 @@ function facilitySummary(f: FacilityRecord): string | null {
   return null;
 }
 
+/** 设施摘要条目：歇脚点候选恒显示（可一键转休息点）；无名且未核对时显式“待补充/待确认” */
+function facilityItem(f: FacilityRecord): string | null {
+  const summary = facilitySummary(f);
+  if (summary !== null) return summary;
+  if (f.kind === 'rest-candidate') return '歇脚点候选（名称待补充，座位待确认）';
+  return null;
+}
+
+/** 转换后的显示名：名称缺失→“未命名歇脚点”（与领域层转换口径一致） */
+function candidateDisplayName(f: FacilityRecord): string {
+  const rawName = (f.facts as Record<string, Fact<unknown> | undefined>).name?.value;
+  return typeof rawName === 'string' && rawName.trim() ? rawName.trim() : '未命名歇脚点';
+}
+
 export function RouteNodeCard({
   node,
   place,
   facilities = [],
+  onConvertRestCandidate,
   index,
   isFirst,
   isLast,
@@ -70,7 +88,9 @@ export function RouteNodeCard({
   onDelete,
 }: RouteNodeCardProps) {
   const isVisit = node.kind === 'visit';
-  const facilityLines = facilities.map(facilitySummary).filter((t): t is string => t !== null);
+  const facilityItems = facilities
+    .map((f) => ({ f, text: facilityItem(f) }))
+    .filter((x): x is { f: FacilityRecord; text: string } => x.text !== null);
   return (
     <article className={styles.nodeCard} aria-label={place?.name ?? '节点'}>
       <div className={styles.nodeHead}>
@@ -97,10 +117,22 @@ export function RouteNodeCard({
         {node.kind === 'rest' && node.seatFact.value !== true ? <span>座位待确认</span> : null}
       </div>
 
-      {facilityLines.length > 0 ? (
+      {facilityItems.length > 0 ? (
         <ul className={styles.facilitySummary} aria-label="设施摘要">
-          {facilityLines.map((text, i) => (
-            <li key={`${text}-${i}`}>{text}</li>
+          {facilityItems.map(({ f, text }) => (
+            <li key={f.id}>
+              <span>{text}</span>
+              {f.kind === 'rest-candidate' && onConvertRestCandidate ? (
+                <button
+                  type="button"
+                  className={`${styles.btn} ${styles.small}`}
+                  aria-label={`转为休息点：${candidateDisplayName(f)}`}
+                  onClick={() => onConvertRestCandidate(f.id)}
+                >
+                  转为休息点
+                </button>
+              ) : null}
+            </li>
           ))}
         </ul>
       ) : null}

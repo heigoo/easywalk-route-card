@@ -7,6 +7,7 @@ import { activeSequence } from '../../../shared/contracts/domain';
 import type { ConstraintVerdicts, TripStats } from '../../domain/compute';
 import type { CardStatus } from '../../domain/status';
 import { approxMinutesText, ceilMinutes, formatShanghaiDateTime, minutesValueText } from '../../domain/format';
+import { detourNoticeFor, sessionDetourCompares, type DetourCompareMap } from '../planning/useDetourCompare';
 import type {
   CardBlock,
   CardStatusVm,
@@ -29,12 +30,18 @@ export interface BuildInput {
   stats: TripStats;
   verdicts: ConstraintVerdicts;
   status: CardStatus;
+  /**
+   * 歇脚绕行对照（Task 4 / R-D）：仅会话内数据，不写行程、不落盘；
+   * 缺省时读会话缓存（与编辑行同一份对照结果）。
+   */
+  detourCompares?: DetourCompareMap;
   now?: string;
 }
 
 export function buildCardViewModel(input: BuildInput): CardViewModel {
   const { itinerary: it, stats, verdicts, status } = input;
   const now = input.now ?? new Date().toISOString();
+  const detourCompares = input.detourCompares ?? sessionDetourCompares();
   const generatedAtText = formatShanghaiDateTime(now);
 
   const titleText = it.title.trim() || '未命名行程';
@@ -242,6 +249,9 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
       if (node.seatFact.value !== true) {
         notices.push({ text: '是否有座位待确认', severity: 'info' });
       }
+      // 歇脚绕行对比（Task 4 / R-D）：对照缺失一律“待补充”，绝不用直线距离或估算冒充
+      const detour = detourNoticeFor(it, id, detourCompares);
+      if (detour) notices.push({ text: detour.text, severity: 'info' });
       notices.push(...collectNodeFacilityNotices(it, id));
       const nodeBlock: NodeBlock = {
         id: blockId('node'),

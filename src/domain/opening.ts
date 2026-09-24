@@ -1,12 +1,16 @@
 /**
- * 开放时间文本的保守解析（R-A2）。
- * 只接受“全周统一 HH:mm-HH:mm”一种形态（可带严格词表内的前缀词）；
- * 其余任何形态一律返回 null（未知不等于没有），不做任何不可靠的语义推断，
- * 不把自由文本自动填入结构化窗口。解析结果仍需用户核对后才可信赖。
+ * 开放时间文本的保守解析（R-A2 / R-C）。
+ * R-A2：只接受“全周统一 HH:mm-HH:mm”一种形态（parseUniformOpeningText，行为保持不变）；
+ * R-C：openingScheduleFromText 额外支持严格分日文法——
+ * “日期组 + （休息/不开放 | 时段列表）”子句以 `;`/`；`/换行并列，日期组词表严格枚举，未列即拒。
+ * 含任一无法解析的形态（跨零点、24:00、乱序、词表外描述、同一天被重复覆盖、
+ * 裸时段混入分日文本等）→ 整体返回 null（宁缺勿假，禁止“半真”数据）。
+ * 出游日期未被文本明确覆盖（明确开放或明确“休息/不开放”）→ 不写结构化时段，只留原文。
+ * 解析结果仍需用户核对后才可信赖。
  */
 import type { OpeningSchedule } from '../../shared/contracts/domain';
 
-/** 允许的前缀词：严格词表，词表外的任何描述（如“周一至周五”）一律不接受 */
+/** 允许的前缀词：严格词表，词表外的任何描述（如“每周一至周日”）一律不接受 */
 const UNIFORM_PREFIXES = ['每日', '每天', '周一至周日', '全年'];
 
 /** 24 小时制时间：小时 0-23（1-2 位），分钟 0-59（必须 2 位） */
@@ -40,15 +44,140 @@ export function parseUniformOpeningText(text: string): UniformOpeningWindow | nu
   return { startLocalTime: start, endLocalTime: end };
 }
 
-/** 由保守解析结果生成单段开放时段；解析不出即 null，不编造 */
+/**
+ * 由文本生成指定出游日期的开放时段（R-A2 单段 + R-C 分日文法）。
+ * - 纯全周单段文本继续走原逻辑解析（兼容既有行为）；
+ *   分日文本按 applicableDate 是星期几求值：明确开放 → 其 windows（可多段），
+ *   明确“休息/不开放” → windows 为空数组（明确当天不开放）。
+ * - 出游日期未被任何日期组覆盖 → null（不写结构化时段，只留原文）。
+ * - applicableDate 非法（非 YYYY-MM-DD 或不存在的日期）、
+ *   或任一子段/子形态不可解析 → 整体 null（解析不出就不写、不编造）。
+ */
 export function openingScheduleFromText(
   text: string,
   applicableDate: string,
   timezone: string,
 ): OpeningSchedule | null {
-  const parsed = parseUniformOpeningText(text);
-  if (!parsed) return null;
-  return { applicableDate, timezone, windows: [parsed] };
+  const weekday = weekdayOfDate(applicableDate);
+  if (weekday === null) return null;
+  const uniform = parseUniformOpeningText(text);
+  if (uniform) return { applicableDate, timezone, windows: [uniform] };
+  const byWeekday = parseDayClauses(text);
+  if (!byWeekday) return null;
+  const windows = byWeekday.get(weekday);
+  // 出游日期未被文本明确覆盖：不写结构化时段
+  if (!windows) return null;
+  return { applicableDate, timezone, windows };
+}
+
+/** 单日词“周X”的 X（严格词表；“星期X”等写法不在词表内，一律拒绝） */
+const DAY_TOKEN = '周[一二三四五六日]';
+/**
+ * 日期组：严格枚举（全周词/固定区间/周末/单日/逗号列表），未列即拒。
+ * 例：`每天`、`每日`、`周一至周日`、`全年`、`周一至周五`、`周六至周日`、`周末`、`周六`、`周一,周三`。
+ */
+const DAY_GROUP = `(每天|每日|周一至周日|全年|周一至周五|周六至周日|周末|${DAY_TOKEN}(?:\\s*[,，]\\s*${DAY_TOKEN})*)`;
+/** 子句：日期组 +（空/休息/不开放/时段列表）；捕获 1=日期组、2=状态或时段部分 */
+const CLAUSE_RE = new RegExp(`^\\s*${DAY_GROUP}\\s*(.*?)\\s*$`);
+/** 单个时段（与 R-A2 的时间规则完全一致） */
+const WINDOW_RE = new RegExp(`^\\s*${TIME}\\s*${SEPARATOR}\\s*${TIME}\\s*$`);
+/** 同一日期组内多时段分隔符：半角逗号或顿号 */
+const WINDOW_SPLIT = /[,、]/;
+/** 多段并列分隔符：分号（半角/全角）或换行 */
+const CLAUSE_SPLIT = /[;；\n]/;
+
+/** 中文星期 → getUTCDay 口径（0=周日 … 6=周六） */
+const WEEKDAY_INDEX: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 0 };
+
+/**
+ * 分日文法整体解析：子句并列 → 每个星期几的开放时段（休息/不开放 → 空数组）。
+ * 任一子段不可解析、或同一天被两个日期组/同一列表重复覆盖 → 整体 null（不猜测）。
+ */
+function parseDayClauses(text: string): Map<number, UniformOpeningWindow[]> | null {
+  const clauses = text
+    .trim()
+    .replace(/\r\n?/g, '\n')
+    .split(CLAUSE_SPLIT)
+    .map((c) => c.trim());
+  const byWeekday = new Map<number, UniformOpeningWindow[]>();
+  for (const clause of clauses) {
+    // 空子段（多余的分隔符/空行）不猜测其含义，整体拒绝
+    if (clause === '') return null;
+    const m = CLAUSE_RE.exec(clause);
+    if (!m) return null;
+    const days = weekdaysOfGroup(m[1]);
+    if (!days) return null;
+    const rest = m[2];
+    let windows: UniformOpeningWindow[];
+    if (rest === '休息' || rest === '不开放') {
+      // 明确不开放：该日时段为空数组（“明确覆盖”仍然成立）
+      windows = [];
+    } else {
+      const parsed = parseWindowList(rest);
+      if (!parsed) return null;
+      windows = parsed;
+    }
+    for (const day of days) {
+      // 同一天被重复/重叠定义（含列表内重复）：无法确定谁生效，整体拒绝
+      if (byWeekday.has(day)) return null;
+      byWeekday.set(day, [...windows]);
+    }
+  }
+  return byWeekday;
+}
+
+/** 日期组 → 覆盖的星期几集合；词表外写法返回 null */
+function weekdaysOfGroup(group: string): number[] | null {
+  switch (group) {
+    case '每天':
+    case '每日':
+    case '周一至周日':
+    case '全年':
+      return [0, 1, 2, 3, 4, 5, 6];
+    case '周一至周五':
+      return [1, 2, 3, 4, 5];
+    case '周六至周日':
+    case '周末':
+      return [6, 0];
+    default: {
+      // 单日或逗号列表（可含全角逗号）
+      const days: number[] = [];
+      for (const item of group.split(/[,，]/)) {
+        const m = /^周([一二三四五六日])$/.exec(item.trim());
+        if (!m) return null;
+        days.push(WEEKDAY_INDEX[m[1]]);
+      }
+      return days.length > 0 ? days : null;
+    }
+  }
+}
+
+/** 时段列表：多个 HH:mm-HH:mm 以 `,`/`、` 分隔；任一段非法即整体 null */
+function parseWindowList(text: string): UniformOpeningWindow[] | null {
+  const windows: UniformOpeningWindow[] = [];
+  for (const part of text.split(WINDOW_SPLIT)) {
+    const m = WINDOW_RE.exec(part.trim());
+    if (!m) return null;
+    const start = normalizeTime(m[1], m[2]);
+    const end = normalizeTime(m[3], m[4]);
+    if (!start || !end) return null;
+    // 跨零点/零长度时段与既有规则一致：不可解析
+    if (start >= end) return null;
+    windows.push({ startLocalTime: start, endLocalTime: end });
+  }
+  return windows.length > 0 ? windows : null;
+}
+
+/**
+ * 校验适用日期并求出其星期几（getUTCDay 口径，星期几与时区无关）。
+ * 非 YYYY-MM-DD 或不存在的日期（如 2026-02-30）返回 null。
+ */
+function weekdayOfDate(date: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const [y, m, d] = date.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== m - 1 || t.getUTCDate() !== d) return null;
+  return t.getUTCDay();
 }
 
 /** 补零为 HH:mm；越界输入返回 null */

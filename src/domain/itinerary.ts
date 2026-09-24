@@ -17,7 +17,7 @@ import type {
   RouteNode,
   VisitNode,
 } from '../../shared/contracts/domain';
-import { SCHEMA_VERSION, unknownFact } from '../../shared/contracts/domain';
+import { SCHEMA_VERSION, coordinateSchema, unknownFact } from '../../shared/contracts/domain';
 import { newId } from './id';
 
 const DEFAULT_TIMEZONE = 'Asia/Shanghai';
@@ -156,6 +156,68 @@ export function addRestNode(
   const nodes = { ...it.nodes, [node.id]: node };
   const nodeOrder = [...it.nodeOrder, node.id];
   return rebuildLegs(touch({ ...it, nodes, nodeOrder }));
+}
+
+/** 候选事实里的坐标值（可选事实键 location）：缺失或非法一律 null，不猜坐标 */
+function factCoordinate(value: unknown): { longitude: number; latitude: number } | null {
+  const parsed = coordinateSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * 候选一键转休息点（Task 3 / R-B）：
+ * - 仅处理 kind='rest-candidate' 的设施记录，其余原样返回（与既有编辑函数同风格，不抛错）；
+ * - 新建地点：名称取候选 name 事实（缺失→“未命名歇脚点”），坐标取候选 location 事实（缺失→null），
+ *   入口未确认、开放事实走 unknownFact（未知不等于没有）；
+ * - 新 rest 节点的 seatFact 整份迁移自候选 seat 事实（来源/核对字段原样保留；无 seat 事实→unknownFact）；
+ * - 新节点插入 nodeOrder 中 afterNodeId 之后并移除原候选记录，随后 rebuildLegs：
+ *   受影响的新路段回到待补充，不沿用旧时间。
+ */
+export function convertRestCandidateToRestNode(
+  it: Itinerary,
+  facilityId: string,
+  afterNodeId: string,
+  now: string = new Date().toISOString(),
+): { itinerary: Itinerary; nodeId: string | null } {
+  const record = it.facilities.find((f) => f.id === facilityId);
+  if (!record || record.kind !== 'rest-candidate') return { itinerary: it, nodeId: null };
+  const facts = record.facts as Record<string, Fact<unknown> | undefined>;
+
+  const rawName = facts.name?.value;
+  const name = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : '未命名歇脚点';
+  const place: PlaceRef = { ...createPlace(name), location: factCoordinate(facts.location?.value) };
+
+  // 座位事实整份迁移：不重建、不覆盖来源与核对字段
+  const seatFact = (facts.seat as RestNode['seatFact'] | undefined) ?? unknownFact<boolean>();
+  const node: RestNode = {
+    kind: 'rest',
+    id: newId(),
+    placeId: place.id,
+    skipped: false,
+    restSeconds: null,
+    seatFact,
+    notes: '',
+  };
+
+  const nodeOrder = [...it.nodeOrder];
+  const idx = nodeOrder.indexOf(afterNodeId);
+  if (idx >= 0) nodeOrder.splice(idx + 1, 0, node.id);
+  else if (it.origin?.id === afterNodeId) nodeOrder.unshift(node.id);
+  else nodeOrder.push(node.id);
+
+  const next = rebuildLegs(
+    touch(
+      {
+        ...it,
+        places: { ...it.places, [place.id]: place },
+        nodes: { ...it.nodes, [node.id]: node },
+        nodeOrder,
+        facilities: it.facilities.filter((f) => f.id !== facilityId),
+      },
+      now,
+    ),
+  );
+  return { itinerary: next, nodeId: node.id };
 }
 
 export function updateNode(it: Itinerary, nodeId: string, patch: Partial<RouteNode>): Itinerary {

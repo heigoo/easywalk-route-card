@@ -3,7 +3,9 @@
  * - 厕所开放、歇脚点座位、台阶有无逐属性记录；默认“待确认”，不提供一键全部核验；
  * - 附近地图候选只是候选：逐属性确认后才写入，来源可追溯到“高德地图搜索”与候选 POI id；
  * - 直线距离只是距查询中心的直线距离，不是步行路程/耗时，不参与任何计算；
+ * - 候选坐标随“确认写入”落到 location 事实（Fact 坐标值），供候选一键转休息点带出坐标；候选无坐标记为未知，不猜坐标；
  * - 用户核对时记录核对日期；没查到不能标成“无”（未知不等于没有）。
+ * - 覆盖保护（R-E）：“确认修改”只写本次实际改动；把已核对属性退回“待确认”是显式回退，须点名属性二次确认。
  */
 import { useEffect, useState } from 'react';
 import type {
@@ -17,6 +19,7 @@ import { unknownFact } from '../../../shared/contracts/domain';
 import type { PlaceSearchItem } from '../../../shared/contracts/api';
 import { ApiRequestError, searchNearby } from '../../services/api';
 import { Dialog } from '../../components/Dialog';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 // 表单控件样式与编辑区共用同一套语义令牌（需求 13.6、13.7）
 import editor from '../itinerary/Editor.module.css';
 import dialogStyles from '../../components/Dialog.module.css';
@@ -106,6 +109,34 @@ function needsWrite(prev: Fact<unknown> | null, next: Fact<unknown>, compareNote
   return compareNote && (prev.note ?? '') !== (next.note ?? '');
 }
 
+/**
+ * 显式回退（需求 R-E）：把“已核对且有值”的事实改回“待确认”。
+ * 会丢掉核对结果与来源，必须经二次确认，不得被无意触发。
+ */
+function isRollback(prev: Fact<unknown> | null, next: Fact<unknown>): boolean {
+  return prev !== null && prev.reviewState === 'userChecked' && prev.value !== null && next.reviewState === 'unknown';
+}
+
+/** 回退二次确认点名属性（R-E）：“factKey 索引 → 属性名” */
+const ROLLBACK_LABELS: Record<string, string> = {
+  'toilet:open': '「厕所开放情况」',
+  'rest-candidate:name': '「名称」',
+  'rest-candidate:address': '「位置说明」',
+  'rest-candidate:seat': '「是否可坐」',
+  'stairs:exists': '「台阶情况」',
+};
+
+/** “确认修改”的待写入项：先收集本次实际改动，回退经确认后一并提交 */
+type PendingWrite = {
+  kind: FacilityKind;
+  factKey: string;
+  fact: Fact<unknown>;
+  /** 二次确认时点名的属性名 */
+  label: string;
+  /** 是否属于“已核对→待确认”的显式回退 */
+  rollback: boolean;
+};
+
 export function FacilityDialog({ open, node, legId = null, preset, itinerary, onClose, onSave }: FacilityDialogProps) {
   const [toiletState, setToiletState] = useState<ToiletState>('unknown');
   const [toiletText, setToiletText] = useState('');
@@ -114,6 +145,8 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
   const [restSeat, setRestSeat] = useState<SeatState>('unknown');
   const [stairsState, setStairsState] = useState<'unknown' | 'yes' | 'no'>('unknown');
   const [stairsNote, setStairsNote] = useState('');
+  // 显式回退二次确认（R-E）：非空＝等待用户确认回退，writes 为本次“确认修改”的全部实际改动
+  const [pendingSubmit, setPendingSubmit] = useState<{ labels: string[]; writes: PendingWrite[] } | null>(null);
 
   // 搜索附近（Task 3 子任务 3.1）
   const [category, setCategory] = useState<NearbyCategory>('TOILET');
@@ -175,16 +208,16 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
     setSearchError(null);
     setExpandedId(null);
     setRecordedIds([]);
+    setPendingSubmit(null);
     // 刻意不依赖 itinerary：写入候选后不重置未确认的手动输入与检索结果
   }, [open, node, legId, stairsOnly]);
 
   if (!target) return null;
 
-  /** 写入事实：未变化不重复写（保留来源）；无已存事实时“待确认”不落空记录 */
-  const writeFact = (kind: FacilityKind, factKey: string, fact: Fact<unknown>, compareNote = false) => {
-    const prev = getFact(itinerary, target, kind, factKey);
-    if (!needsWrite(prev, fact, compareNote)) return;
-    onSave(target, kind, factKey, fact);
+  /** 提交“确认修改”的待写入项（只含本次实际改动），随后关闭弹层 */
+  const submit = (writes: PendingWrite[]) => {
+    for (const w of writes) onSave(target, w.kind, w.factKey, w.fact);
+    onClose();
   };
 
   const doSearch = async () => {
@@ -233,6 +266,16 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
         ? candidateCheckedFact(item.address.trim(), item, fetchedAt, now, itinerary.travelDate)
         : unknownFact(),
     );
+    // 候选坐标写入 location 事实（GCJ-02 坐标对象）：转休息点时带出坐标，可自动获取步行数据与绕行对比；
+    // 候选无坐标记为未知（不猜坐标），转换后明确提示“位置待确认”
+    onSave(
+      target,
+      kind,
+      'location',
+      item.location
+        ? candidateCheckedFact(item.location, item, fetchedAt, now, itinerary.travelDate)
+        : unknownFact(),
+    );
     if (kind === 'toilet') {
       // 待确认＝未知，不写成“不开放”
       onSave(
@@ -268,12 +311,26 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
 
   const confirm = () => {
     const now = new Date().toISOString();
+    const writes: PendingWrite[] = [];
+    /** 只收集本次实际改动：未变化不重复写（保留来源）；无已存事实时“待确认”不落空记录 */
+    const push = (kind: FacilityKind, factKey: string, fact: Fact<unknown>, compareNote = false) => {
+      const prev = getFact(itinerary, target, kind, factKey);
+      if (!needsWrite(prev, fact, compareNote)) return;
+      writes.push({
+        kind,
+        factKey,
+        fact,
+        label: ROLLBACK_LABELS[`${kind}:${factKey}`] ?? `「${factKey}」`,
+        rollback: isRollback(prev, fact),
+      });
+    };
+
     if (!stairsOnly) {
       const toiletFact: Fact<unknown> =
         toiletState === 'checked'
           ? userCheckedFact(toiletText.trim() || null, now, itinerary.travelDate)
           : unknownFact();
-      writeFact('toilet', 'open', toiletFact);
+      push('toilet', 'open', toiletFact);
 
       // 歇脚点候选手动块（3.3）：有输入或已有记录才写，避免产生空记录
       const hasRestInput = restName.trim() !== '' || restAddress.trim() !== '' || restSeat !== 'unknown';
@@ -281,9 +338,9 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
         (f) => f.kind === 'rest-candidate' && matchesTarget(f.target, target),
       );
       if (hasRestInput || hasRestRecord) {
-        writeFact('rest-candidate', 'name', restName.trim() ? userCheckedFact(restName.trim(), now, itinerary.travelDate) : unknownFact());
-        writeFact('rest-candidate', 'address', restAddress.trim() ? userCheckedFact(restAddress.trim(), now, itinerary.travelDate) : unknownFact());
-        writeFact(
+        push('rest-candidate', 'name', restName.trim() ? userCheckedFact(restName.trim(), now, itinerary.travelDate) : unknownFact());
+        push('rest-candidate', 'address', restAddress.trim() ? userCheckedFact(restAddress.trim(), now, itinerary.travelDate) : unknownFact());
+        push(
           'rest-candidate',
           'seat',
           restSeat === 'unknown' ? unknownFact() : userCheckedFact(restSeat === 'yes', now, itinerary.travelDate),
@@ -296,9 +353,27 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
       stairsState === 'unknown'
         ? unknownFact()
         : { ...userCheckedFact(stairsState === 'yes', now, itinerary.travelDate), note: stairsNote.trim() || null };
-    writeFact('stairs', 'exists', stairsFact, true);
-    onClose();
+    push('stairs', 'exists', stairsFact, true);
+
+    // 显式回退（已核对→待确认）先点名属性二次确认；确认前不写入、不关闭（R-E）
+    const labels = writes.filter((w) => w.rollback).map((w) => w.label);
+    if (labels.length > 0) {
+      setPendingSubmit({ labels, writes });
+      return;
+    }
+    submit(writes);
   };
+
+  /** 确认回退：本次“确认修改”的全部实际改动一并提交（回退＋其他改动，不部分生效） */
+  const confirmPending = () => {
+    if (!pendingSubmit) return;
+    const { writes } = pendingSubmit;
+    setPendingSubmit(null);
+    submit(writes);
+  };
+
+  /** 放弃回退＝放弃本次“确认修改”整体提交：不写入、保留草稿、弹层不关闭 */
+  const cancelPending = () => setPendingSubmit(null);
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? undefined : onClose())} title="设施备注（逐属性核对）">
@@ -525,6 +600,17 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
           确认修改
         </button>
       </div>
+
+      {/* 显式回退二次确认（R-E）：ConfirmDialog 经 Portal 独立渲染，点名属性后才执行回退 */}
+      <ConfirmDialog
+        open={pendingSubmit !== null}
+        title="退回待确认？"
+        description={`将把已核对的${(pendingSubmit?.labels ?? []).join('')}退回待确认。退回后该属性记为“待确认”（未知），原核对结果与来源不再保留。`}
+        confirmText="确认退回"
+        danger
+        onConfirm={confirmPending}
+        onCancel={cancelPending}
+      />
     </Dialog>
   );
 }

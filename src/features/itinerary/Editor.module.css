@@ -457,3 +457,27 @@
   color: var(--text-secondary);
   font-size: var(--font-small);
 }
+
+/* 歇脚点候选转休息点入口（Task 3 / R-B） */
+.facilitySummary li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* 歇脚绕行对比行（Task 4 / R-D）：仅会话内对照展示 */
+.detourLine {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+  border-left: 2px solid var(--divider);
+  margin-left: var(--sp-4);
+}
+
+.detourLine button {
+  margin-left: auto;
+}

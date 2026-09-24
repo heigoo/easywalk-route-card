@@ -9,6 +9,15 @@ import userEvent from '@testing-library/user-event';
 import { App } from '../../src/app/App';
 import { plan } from '../../src/workers/planner';
 import type { PlannerInput, PlannerRequestMessage, PlannerResponseMessage } from '../../src/workers/planner-types';
+import {
+  addRestNode,
+  createEmptyItinerary,
+  setEndpoint,
+  setManualLegTime,
+  upsertPlace,
+} from '../../src/domain/itinerary';
+import { clearDetourCompares } from '../../src/features/planning/useDetourCompare';
+import { makePlace } from '../helpers';
 
 /** Worker 桩：收到请求后同步调用纯函数 plan，并按协议回发 */
 class StubPlannerWorker {
@@ -146,9 +155,9 @@ describe('P1 自动规划界面', () => {
     await user.type(screen.getByLabelText('搜索城市'), '示例市');
     await user.click(screen.getByRole('button', { name: '搜索地点' }));
     const items = await screen.findAllByRole('listitem');
-    await within(items[0]).getByRole('button', { name: '设为起点' }).click();
-    await within(items[1]).getByRole('button', { name: '设为终点' }).click();
-    await within(items[2]).getByRole('button', { name: '设为景点' }).click();
+    await user.click(within(items[0]).getByRole('button', { name: '设为起点' }));
+    await user.click(within(items[1]).getByRole('button', { name: '设为终点' }));
+    await user.click(within(items[2]).getByRole('button', { name: '设为景点' }));
 
     // 补全停留时长，使候选可核验（第 6.4.6 节）
     const nodeCard = screen.getByRole('article', { name: '示例景点甲' });
@@ -213,9 +222,9 @@ describe('P1 自动规划界面', () => {
     await user.type(screen.getByLabelText('搜索城市'), '示例市');
     await user.click(screen.getByRole('button', { name: '搜索地点' }));
     const items = await screen.findAllByRole('listitem');
-    await within(items[0]).getByRole('button', { name: '设为起点' }).click();
-    await within(items[1]).getByRole('button', { name: '设为终点' }).click();
-    await within(items[2]).getByRole('button', { name: '设为景点' }).click();
+    await user.click(within(items[0]).getByRole('button', { name: '设为起点' }));
+    await user.click(within(items[1]).getByRole('button', { name: '设为终点' }));
+    await user.click(within(items[2]).getByRole('button', { name: '设为景点' }));
 
     // 补全停留时长，使候选可核验（第 6.4.6 节）
     const nodeCard = screen.getByRole('article', { name: '示例景点甲' });
@@ -288,9 +297,9 @@ describe('P1 自动规划界面', () => {
     await user.type(screen.getByLabelText('搜索城市'), '示例市');
     await user.click(screen.getByRole('button', { name: '搜索地点' }));
     const items = await screen.findAllByRole('listitem');
-    await within(items[0]).getByRole('button', { name: '设为起点' }).click();
-    await within(items[1]).getByRole('button', { name: '设为终点' }).click();
-    await within(items[2]).getByRole('button', { name: '设为景点' }).click();
+    await user.click(within(items[0]).getByRole('button', { name: '设为起点' }));
+    await user.click(within(items[1]).getByRole('button', { name: '设为终点' }));
+    await user.click(within(items[2]).getByRole('button', { name: '设为景点' }));
 
     // 补全停留时长，使候选可核验（第 6.4.6 节）
     const nodeCard = screen.getByRole('article', { name: '示例景点甲' });
@@ -340,5 +349,171 @@ describe('P1 自动规划界面', () => {
     await user.click(updatedBtn);
     expect(screen.getByLabelText('其中步行（分钟）')).toHaveValue('13');
     await user.click(screen.getByRole('button', { name: '取消' }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 4（R-D）：绕路步行纳入计算——休息点“歇脚绕行”对照（会话内，不落盘）
+// ---------------------------------------------------------------------------
+
+function fileOf(text: string): File {
+  return new File([text], 'backup.json', { type: 'application/json' });
+}
+
+/** 绕行对照样例：起点→休息点→终点，两段手动 8+10 分钟；(起点→终点) 为直达对照边 */
+function restDetourBackup(opts: { nextHasCoord?: boolean } = {}) {
+  let it = createEmptyItinerary('2026-09-22T00:00:00.000Z');
+  const pO = makePlace('示例起点', 116.397, 39.908);
+  const pR = makePlace('示例休息点', 116.4, 39.91);
+  const pB = makePlace('示例终点', 116.406, 39.914);
+  if (opts.nextHasCoord === false) pB.location = null;
+  for (const p of [pO, pR, pB]) it = upsertPlace(it, p);
+  it = setEndpoint(it, 'origin', pO.id);
+  it = setEndpoint(it, 'destination', pB.id);
+  it = addRestNode(it, pR.id, { restSeconds: 10 * 60 });
+  const rId = it.nodeOrder[0];
+  const legBetween = (from: string, to: string) =>
+    Object.values(it.legs).find((l) => l.fromNodeId === from && l.toNodeId === to)!;
+  it = setManualLegTime(it, legBetween(it.origin!.id, rId).id, { walkingSeconds: 8 * 60 });
+  it = setManualLegTime(it, legBetween(rId, it.destination!.id).id, { walkingSeconds: 10 * 60 });
+  return { file: fileOf(JSON.stringify(it)), oId: it.origin!.id, rId, bId: it.destination!.id };
+}
+
+/** 直达对照成功回包（单 pair，按请求中的 pairs 回边） */
+function detourOkResponse(rawWalkingSeconds: number) {
+  return async (_url: string | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { pairs: Array<{ fromId: string; toId: string }> };
+    return {
+      ok: true,
+      json: async () => ({
+        requestId: 'detour-1',
+        data: {
+          edges: body.pairs.map((p) => ({
+            fromId: p.fromId,
+            toId: p.toId,
+            fromCoordinateRevision: 0,
+            toCoordinateRevision: 0,
+            state: 'ready' as const,
+            distanceMeters: 1200,
+            rawWalkingSeconds,
+            provider: 'amap',
+            providerApiVersion: 'v5',
+            fetchedAt: '2026-09-22T05:00:00.000Z',
+            reportedFeatures: [],
+          })),
+          failures: [],
+          queryCoverage: 'complete' as const,
+          fetchedAt: '2026-09-22T05:00:00.000Z',
+        },
+        warnings: [],
+      }),
+    };
+  };
+}
+
+/** 用备份导入建立行程（与真实导入流程一致） */
+async function importBackup(user: ReturnType<typeof userEvent.setup>, file: File) {
+  const { container } = render(<App />);
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  await user.upload(input, file);
+  await screen.findByText('导入备份？');
+  await user.click(screen.getByRole('button', { name: '确认导入' }));
+}
+
+describe('歇脚绕行对比（Task 4 / R-D）', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    clearDetourCompares();
+    vi.stubGlobal('Worker', StubPlannerWorker);
+  });
+
+  afterEach(() => {
+    clearDetourCompares();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('休息点行显示“歇脚绕行：比直达多走约 X 分钟”并注明口径；同一 triple 只查一次', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockImplementation(detourOkResponse(15 * 60));
+    vi.stubGlobal('fetch', fetchSpy);
+    const { file, oId, bId } = restDetourBackup();
+    await importBackup(user, file);
+
+    // 两段 8+10=18 分钟、直达 15 分钟 → 多走约 3 分钟（按当前步行倍数估算）
+    expect(
+      await screen.findByText('歇脚绕行：比直达多走约 3 分钟（按当前步行倍数估算）'),
+    ).toBeInTheDocument();
+    // 直达对照为单 pair（上一站→下一站），不查其余边
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as {
+      nodes: unknown[];
+      pairs: Array<{ fromId: string; toId: string }>;
+    };
+    expect(body.pairs).toEqual([{ fromId: oId, toId: bId }]);
+    expect(body.nodes).toHaveLength(2);
+
+    // 同一 triple 只查一次：行程再编辑不重复请求
+    await user.type(screen.getByLabelText('行程名称'), '绕行样例{enter}');
+    await waitFor(() =>
+      expect((screen.getByLabelText('行程名称') as HTMLInputElement).value).toBe('绕行样例'),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('对照失败→“绕行对比待补充”且不自动重试；点“重试对比”才重查', async () => {
+    const user = userEvent.setup();
+    let calls = 0;
+    const fetchSpy = vi.fn().mockImplementation(async (url: string | URL, init?: RequestInit) => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          ok: true,
+          json: async () => ({
+            code: 'UPSTREAM_TIMEOUT',
+            message: '上游超时',
+            retryable: true,
+            fieldErrors: [],
+            requestId: 'detour-1',
+          }),
+        };
+      }
+      return detourOkResponse(15 * 60)(url, init);
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    const { file } = restDetourBackup();
+    await importBackup(user, file);
+
+    // 失败只留“待补充”，绝不用直线距离或估算冒充
+    expect(await screen.findByText('绕行对比待补充')).toBeInTheDocument();
+    expect(screen.queryByText(/多走|直线/)).not.toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // 不自动重试轰炸：无关编辑后仍只有 1 次
+    await user.type(screen.getByLabelText('行程名称'), '失败样例{enter}');
+    await waitFor(() =>
+      expect((screen.getByLabelText('行程名称') as HTMLInputElement).value).toBe('失败样例'),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // 手动“重试对比”才重查
+    await user.click(screen.getByRole('button', { name: '重试对比' }));
+    expect(
+      await screen.findByText('歇脚绕行：比直达多走约 3 分钟（按当前步行倍数估算）'),
+    ).toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('下一站缺坐标→“绕行对比待补充”且不发起请求', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const { file } = restDetourBackup({ nextHasCoord: false });
+    await importBackup(user, file);
+
+    expect(await screen.findByText('绕行对比待补充')).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // 不显示任何对比数值，也不用直线距离冒充
+    expect(screen.queryByText(/多走|直线/)).not.toBeInTheDocument();
   });
 });

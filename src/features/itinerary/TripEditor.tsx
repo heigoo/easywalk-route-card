@@ -12,6 +12,7 @@ import {
   addVisitNode,
   adoptAllMapLegs,
   confirmEntrance,
+  convertRestCandidateToRestNode,
   createPlace,
   moveNode,
   removeNode,
@@ -26,6 +27,7 @@ import {
   upsertPlace,
 } from '../../domain/itinerary';
 import { ceilMinutes } from '../../domain/format';
+import { detourNoticeFor, useDetourCompare } from '../planning/useDetourCompare';
 import { parseItineraryBackup, serializeItineraryBackup } from '../../storage/local';
 import { TextField } from '../../components/fields';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
@@ -90,7 +92,12 @@ export function TripEditor({
   const [confirmAdoptAll, setConfirmAdoptAll] = useState(false);
   const [pendingImport, setPendingImport] = useState<Itinerary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  /** 候选转休息点后的持久提示（Task 3 / R-B）：不是一闪而过的 Toast */
+  const [convertHint, setConvertHint] = useState<{ locationMissing: boolean } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+
+  // 歇脚绕行对照（Task 4 / R-D）：结果仅会话内，不写行程、不落盘
+  const detour = useDetourCompare(it);
 
   const seq = useMemo(() => activeSequence(it), [it]);
   const activeVisits = seq.filter((id) => it.nodes[id]?.kind === 'visit');
@@ -156,6 +163,34 @@ export function TripEditor({
     if (!confirmSkipId) return;
     apply((prev) => skipNode(prev, confirmSkipId));
     setConfirmSkipId(null);
+  };
+
+  /**
+   * 歇脚点候选一键转休息点（Task 3 / R-B）：
+   * 提示只依赖转换前可知的信息（新节点是否带坐标），不从状态更新器里捕获新 id。
+   */
+  const convertRestCandidate = (facilityId: string, afterNodeId: string) => {
+    const preview = convertRestCandidateToRestNode(it, facilityId, afterNodeId);
+    const created = preview.nodeId ? preview.itinerary.nodes[preview.nodeId] : null;
+    const place = created ? preview.itinerary.places[created.placeId] : null;
+    setConvertHint({ locationMissing: place ? place.location === null : true });
+    apply((prev) => convertRestCandidateToRestNode(prev, facilityId, afterNodeId).itinerary);
+  };
+
+  /** 休息点行的歇脚绕行对比（Task 4 / R-D）；对照不可得一律“绕行对比待补充” */
+  const detourLineFor = (nodeId: string) => {
+    const notice = detourNoticeFor(it, nodeId, detour.compares);
+    if (!notice) return null;
+    return (
+      <div className={styles.detourLine}>
+        <span aria-live="polite">{notice.text}</span>
+        {notice.retryable ? (
+          <button type="button" className={`${styles.btn} ${styles.small}`} onClick={() => detour.retry(nodeId)}>
+            重试对比
+          </button>
+        ) : null}
+      </div>
+    );
   };
 
   /** 导出备份文件：文件名=省脚力路线卡-{行程名称或“未命名”}-{出游日期或“无日期”}.json */
@@ -252,6 +287,13 @@ export function TripEditor({
         </div>
       ) : null}
 
+      {convertHint ? (
+        <div className={`${styles.reminder} info`} role="note">
+          <span>已加入路线，请补充新路段步行时间</span>
+          {convertHint.locationMissing ? <span>位置待确认，暂不能自动获取步行数据</span> : null}
+        </div>
+      ) : null}
+
       {cardStatus.kind === 'violated' || cardStatus.kind === 'draft' || cardStatus.kind === 'blocked'
         ? cardStatus.notices.map((n, i) => (
             <div key={i} className={`${styles.reminder} ${n.severity === 'error' ? 'error' : n.severity === 'warning' ? 'warning' : 'info'}`} role="note">
@@ -304,6 +346,7 @@ export function TripEditor({
                 node={node}
                 place={it.places[node.placeId]}
                 facilities={it.facilities.filter((f) => f.target.type === 'node' && f.target.nodeId === id)}
+                onConvertRestCandidate={(facilityId) => convertRestCandidate(facilityId, id)}
                 index={node.kind === 'visit' ? (visitIndex.get(id) ?? null) : null}
                 isFirst={idx === (it.origin ? 1 : 0)}
                 isLast={idx === seq.length - (it.destination ? 2 : 1)}
@@ -317,6 +360,7 @@ export function TripEditor({
                 }}
                 onDelete={() => setConfirmDeleteNodeId(id)}
               />
+              {node.kind === 'rest' ? detourLineFor(id) : null}
             </div>
           );
         })}
