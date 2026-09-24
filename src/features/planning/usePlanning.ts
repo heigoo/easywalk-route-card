@@ -17,6 +17,9 @@ import { listCandidatePairs } from '../../workers/planner';
 
 export type RequestPhase = 'idle' | 'loading' | 'partial' | 'success' | 'failed' | 'cancelled';
 
+/** 单次矩阵请求的 pair 上限（服务端默认最多 96 次上游尝试；预留少量失败重试余量） */
+export const MAX_MATRIX_PAIRS = 80;
+
 export interface PlanningState {
   phase: RequestPhase;
   /** 与实际进度一致的阶段说明，不伪造百分比（第 7.4 节） */
@@ -113,9 +116,15 @@ export function usePlanning(
         coordinateRevision: 0,
       });
     }
-    const pairs = listCandidatePairs(itinerary)
+    const allPairs = listCandidatePairs(itinerary)
       .map((p) => ({ fromId: p.from, toId: p.to }))
       .filter((p) => nodes.some((n) => n.id === p.fromId) && nodes.some((n) => n.id === p.toId));
+    // 核心路线边优先，插入歇脚边靠后；总量控制在服务端 96 次尝试预算内，降低 partial
+    const isInsertPair = (p: { fromId: string; toId: string }) =>
+      p.fromId.startsWith('rest-cand:') || p.toId.startsWith('rest-cand:');
+    const corePairs = allPairs.filter((p) => !isInsertPair(p));
+    const insertPairs = allPairs.filter(isInsertPair);
+    const pairs = [...corePairs, ...insertPairs].slice(0, MAX_MATRIX_PAIRS);
     return { nodes, pairs, missing };
   }, [itinerary]);
 

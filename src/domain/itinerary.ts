@@ -169,7 +169,8 @@ function factCoordinate(value: unknown): { longitude: number; latitude: number }
  * - 处理 kind='rest-candidate' | 'toilet' 的设施记录，其余原样返回（与既有编辑函数同风格，不抛错）；
  * - 新建地点：名称取候选 name 事实（缺失→“未命名歇脚点”/“未命名厕所”），坐标取候选 location 事实（缺失→null），
  *   入口未确认、开放事实走 unknownFact（未知不等于没有）；
- * - 新 rest 节点的 seatFact 整份迁移自候选 seat 事实（来源/核对字段原样保留；无 seat 事实→unknownFact）；
+ * - 新 rest 节点的 seatFact 整份迁移自候选 seat 事实（来源/核对字段原样保留）；
+ *   歇脚无 seat→unknownFact；厕所无 seat→明确不计坐休分界（seat=false、restSeconds=0，绕行仍进总步行）；
  * - 厕所候选的 open 事实随迁到新节点的 toilet 设施记录，不丢开放核对；
  * - 新节点插入 nodeOrder 中 afterNodeId 之后并移除原候选记录，随后 rebuildLegs：
  *   受影响的新路段回到待补充，不沿用旧时间。绕行两段进入既有汇总与歇脚绕行对照。
@@ -191,14 +192,32 @@ export function convertFacilityCandidateToRestNode(
   const name = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : fallbackName;
   const place: PlaceRef = { ...createPlace(name), location: factCoordinate(facts.location?.value) };
 
-  // 座位事实整份迁移：不重建、不覆盖来源与核对字段；厕所无 seat 事实时保持未知（未知≠不可坐）
-  const seatFact = (facts.seat as RestNode['seatFact'] | undefined) ?? unknownFact<boolean>();
+  // 座位事实整份迁移：不重建、不覆盖来源与核对字段
+  const isToilet = record.kind === 'toilet';
+  const migratedSeat = facts.seat as RestNode['seatFact'] | undefined;
+  const seatFact: RestNode['seatFact'] =
+    migratedSeat ??
+    (isToilet
+      ? {
+          // 厕所途经：绕行计入总步行，但不默认切分连续步行（classifyRest(false)=noReset）
+          value: false,
+          sourceType: 'user',
+          sourceName: null,
+          sourceReference: null,
+          fetchedAt: null,
+          reviewState: 'userChecked',
+          checkedAt: now,
+          applicableDate: null,
+          note: '厕所途经计入绕行；未确认坐下前不作为连续步行分界，可在节点编辑中改座位与时长',
+        }
+      : unknownFact<boolean>());
   const node: RestNode = {
     kind: 'rest',
     id: newId(),
     placeId: place.id,
     skipped: false,
-    restSeconds: null,
+    // 厕所默认不编造停留；有迁移 seat 事实时仍未知时长
+    restSeconds: isToilet && !migratedSeat ? 0 : null,
     seatFact,
     notes: '',
   };

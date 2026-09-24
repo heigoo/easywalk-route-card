@@ -257,6 +257,7 @@ describe('P1 自动规划界面', () => {
 
     // 路段行出现阶梯提示；未核对前不下“无台阶”结论
     expect(screen.getAllByText('高德标注本段可能有阶梯（待核对）').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/地图提示重载后会消失/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/无台阶/)).not.toBeInTheDocument();
 
     // 一键记录台阶核对：打开对话框并预选台阶项

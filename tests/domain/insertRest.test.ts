@@ -76,16 +76,17 @@ describe('listInsertableRestCandidates', () => {
 });
 
 describe('规划器插入歇脚候选', () => {
-  it('listCandidatePairs 含挂靠站相邻边上的插入对', () => {
+  it('listCandidatePairs 含插入对：挂靠站相邻边与序列其它相邻边（长连续段可插入）', () => {
     const { it, oId, aId, bId, dId } = setupWithCandidate(true, true);
     const r = listInsertableRestCandidates(it)[0];
     const pairs = listCandidatePairs(it).map((p) => `${p.from}|${p.to}`);
-    // 起点→A→B→终点：A 为挂靠站，应含 起点→R、R→A、A→R、R→B
+    // 起点→A→B→终点：A 为挂靠站；B→终点虽不挨挂靠站，也可插入
     expect(pairs).toContain(`${oId}|${r.virtualId}`);
     expect(pairs).toContain(`${r.virtualId}|${aId}`);
     expect(pairs).toContain(`${aId}|${r.virtualId}`);
     expect(pairs).toContain(`${r.virtualId}|${bId}`);
-    expect(pairs).not.toContain(`${r.virtualId}|${dId}`);
+    expect(pairs).toContain(`${bId}|${r.virtualId}`);
+    expect(pairs).toContain(`${r.virtualId}|${dId}`);
   });
 
   it('连续步行超限时有限枚举插入已确认坐位的歇脚候选', () => {

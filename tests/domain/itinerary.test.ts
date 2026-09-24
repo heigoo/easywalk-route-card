@@ -354,8 +354,12 @@ describe('歇脚点候选一键转休息点（Task 3 / R-B）', () => {
     const toiletId = withToilet.facilities.find((f) => f.kind === 'toilet')!.id;
     const toilet = convertRestCandidateToRestNode(withToilet, toiletId, aId);
     expect(toilet.nodeId).not.toBeNull();
-    const toiletPlace = toilet.itinerary.places[(toilet.itinerary.nodes[toilet.nodeId!] as RestNode).placeId];
+    const toiletNode = toilet.itinerary.nodes[toilet.nodeId!] as RestNode;
+    const toiletPlace = toilet.itinerary.places[toiletNode.placeId];
     expect(toiletPlace.name).toBe('东侧公厕');
+    // 厕所默认途经：不计坐休分界（seat=false），不编造停留（restSeconds=0）
+    expect(toiletNode.seatFact.value).toBe(false);
+    expect(toiletNode.restSeconds).toBe(0);
     // 开放事实随迁到新节点的 toilet 设施
     const openFact = toilet.itinerary.facilities.find(
       (f) => f.kind === 'toilet' && f.target.type === 'node' && f.target.nodeId === toilet.nodeId,

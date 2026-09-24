@@ -335,8 +335,9 @@ export function TripEditor({
       {convertHint ? (
         <div className={`${styles.reminder} ${styles.info}`} role="note">
           <span>
-            {convertHint.kind === 'toilet' ? '厕所已加入路线，绕行步行会计入总量' : '已加入路线'}
-            ，请补充新路段步行时间
+            {convertHint.kind === 'toilet'
+              ? '厕所已加入路线，绕行步行会计入总量；默认途经、不计坐休分界（坐下休息可在节点编辑中改）'
+              : '已加入路线，请补充新路段步行时间'}
           </span>
           {convertHint.locationMissing ? <span>位置待确认，暂不能自动获取步行数据</span> : null}
           <button type="button" className={`${styles.btn} ${styles.small}`} onClick={() => setConvertHint(null)}>
@@ -661,8 +662,11 @@ function LegRow({
         {leg.durationSource === 'adopted' ? ' · 已采纳地图估算' : ''}
       </span>
       {stairsReported ? (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
           <span>高德标注本段可能有阶梯（待核对）</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-small)' }}>
+            地图提示重载后会消失，核对结果才保留
+          </span>
           <button type="button" className={`${styles.btn} ${styles.small}`} onClick={onRecordStairs}>
             记录台阶核对
           </button>

@@ -117,9 +117,13 @@ export function RouteNodeCard({
             <span>园内步行 {node.insideWalkSeconds === null ? '待确认' : `${ceilMinutes(node.insideWalkSeconds)} 分钟`}</span>
           </>
         ) : (
-          <span>坐下歇 {node.restSeconds === null ? '待确认' : `${ceilMinutes(node.restSeconds)} 分钟`}</span>
+          <span>
+            {node.seatFact.value === false && node.restSeconds === 0
+              ? '途经（不计坐休分界）'
+              : `坐下歇 ${node.restSeconds === null ? '待确认' : `${ceilMinutes(node.restSeconds)} 分钟`}`}
+          </span>
         )}
-        {node.kind === 'rest' && node.seatFact.value !== true ? <span>座位待确认</span> : null}
+        {node.kind === 'rest' && node.seatFact.value === null ? <span>座位待确认</span> : null}
       </div>
 
       {facilityItems.length > 0 ? (

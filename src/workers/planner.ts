@@ -94,19 +94,33 @@ export function listCandidatePairs(itinerary: Itinerary): Array<{ from: string; 
       }
     }
   }
-  // 可插入歇脚候选：仅挂靠站相邻的有效路段上枚举插入边（有限，避免矩阵爆炸）
+  // 可插入歇脚候选：有效序列相邻边上枚举插入边（a→R→b）。
+  // 优先挂靠站相邻边，其次其它相邻边（长连续段也可插入）；总量有上限，避免矩阵爆炸。
   const seq = activeSequence(itinerary);
-  for (const r of listInsertableRestCandidates(itinerary)) {
+  const inserts = listInsertableRestCandidates(itinerary);
+  type InsertSlot = { a: string; b: string; r: (typeof inserts)[number]; hostFirst: boolean };
+  const slots: InsertSlot[] = [];
+  for (const r of inserts) {
     for (let i = 0; i < seq.length - 1; i++) {
       const a = seq[i];
       const b = seq[i + 1];
-      if (a !== r.hostNodeId && b !== r.hostNodeId) continue;
-      push(a, r.virtualId);
-      push(r.virtualId, b);
+      slots.push({ a, b, r, hostFirst: a === r.hostNodeId || b === r.hostNodeId });
     }
+  }
+  slots.sort((x, y) => Number(y.hostFirst) - Number(x.hostFirst));
+  let insertPairBudget = MAX_INSERT_MATRIX_PAIRS;
+  for (const slot of slots) {
+    if (insertPairBudget <= 0) break;
+    const before = pairs.length;
+    push(slot.a, slot.r.virtualId);
+    push(slot.r.virtualId, slot.b);
+    insertPairBudget -= pairs.length - before;
   }
   return pairs;
 }
+
+/** 插入歇脚相关的矩阵边上限（成对计：a→R 与 R→b）；超出部分不取数，规划侧自动跳过 */
+export const MAX_INSERT_MATRIX_PAIRS = 32;
 
 // ---------------------------------------------------------------------------
 // 边解析与显示名
@@ -539,25 +553,40 @@ export function plan(input: PlannerInput, options: PlanOptions = {}): PlannerRes
     collected.push({ candidate, ordinal: ordinal++ });
   };
 
-  /** 连续步行超限（或已知硬限剪枝）时，有限枚举在挂靠站相邻边上插入已确认坐位的歇脚候选 */
+  /** 连续步行超限（或已知硬限剪枝）时，有限枚举在路径相邻边上插入已确认坐位的歇脚候选 */
   const tryInsertRests = (path: string[]): void => {
     if (insertables.length === 0) return;
+    let overLimitNoted = false;
     for (const r of insertables) {
-      for (let i = 0; i < path.length - 1; i++) {
-        const a = path[i];
-        const b = path[i + 1];
-        if (a !== r.hostNodeId && b !== r.hostNodeId) continue;
-        const variant = [...path.slice(0, i + 1), r.virtualId, ...path.slice(i + 1)];
-        const keptVisits = variant.filter((id) => it.nodes[id]?.kind === 'visit');
+      // 挂靠站相邻边优先，其次路径其它边（长连续段也可插入）
+      const edgeSlots = path.slice(0, -1).map((_, i) => ({
+        at: i + 1,
+        a: path[i],
+        b: path[i + 1],
+        hostFirst: path[i] === r.hostNodeId || path[i + 1] === r.hostNodeId,
+      }));
+      edgeSlots.sort((x, y) => Number(y.hostFirst) - Number(x.hostFirst));
+      for (const { at, a, b } of edgeSlots) {
+        const pathVariant = [...path.slice(0, at), r.virtualId, ...path.slice(at)];
+        const keptVisits = pathVariant.filter((id) => it.nodes[id]?.kind === 'visit');
         if (!hasRequired && keptVisits.length === 0) continue;
-        if (variant.length > MAX_ACTIVITY_NODES) {
-          // 插入后超上限：不静默丢点，也不生成不可应用候选；由主文案提示拆分
+        if (pathVariant.length > MAX_ACTIVITY_NODES) {
+          if (!overLimitNoted) {
+            overLimitNoted = true;
+            conflicts.push(
+              `插入休息点后活动节点将超过自动规划上限 ${MAX_ACTIVITY_NODES}（含起终点与休息点），请拆分行程后再规划`,
+            );
+          }
           continue;
         }
-        const sim2 = simulate(it, edges, variant, insertMap);
+        // 仅在插入边已有路段时间时枚举（未知边不按零成本断言可省力）
+        const resIn = resolveEdge(it, edges, a, r.virtualId);
+        const resOut = resolveEdge(it, edges, r.virtualId, b);
+        if (resIn.kind !== 'known' || resOut.kind !== 'known') continue;
+        const sim2 = simulate(it, edges, pathVariant, insertMap);
         if (sim2.pruned) continue;
         enumerated += 1;
-        collectPath(variant, sim2, [
+        collectPath(pathVariant, sim2, [
           { virtualId: r.virtualId, facilityId: r.facilityId, afterNodeId: a },
         ]);
       }
