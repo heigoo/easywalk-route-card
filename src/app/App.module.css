@@ -54,6 +54,22 @@
   white-space: nowrap;
 }
 
+/* 节庆动画开关（顶栏） */
+.festToggleBtn {
+  min-height: 44px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-input);
+  border: 1px solid var(--fest-gold);
+  background: var(--surface-raised);
+  color: var(--fest-gold);
+  font-size: var(--font-small);
+}
+
+.festToggleBtn[aria-pressed='false'] {
+  border-color: var(--control-border);
+  color: var(--text-muted);
+}
+
 /* 行程列表面板（Task 6） */
 .tripPanel {
   display: flex;
