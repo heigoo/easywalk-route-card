@@ -106,7 +106,9 @@ export function RouteNodeCard({
         {isVisit ? (
           <span className={`${styles.badge} ${node.required ? '' : styles.brand}`}>{node.required ? '必去' : '可选 · 累了可跳过'}</span>
         ) : (
-          <span className={styles.badge}>休息点</span>
+          <span className={styles.badge}>
+            {node.seatFact.value === false && node.restSeconds === 0 ? '途经' : '休息点'}
+          </span>
         )}
       </div>
 

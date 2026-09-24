@@ -265,11 +265,14 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
         });
       }
     } else {
+      // 与编辑区 RouteNodeCard 同口径：厕所途经（seat=false 且休息 0）不写成坐下歇，也不再问座位
+      const passThrough = node.seatFact.value === false && node.restSeconds === 0;
       const metaLines: string[] = [];
-      if (node.restSeconds !== null) metaLines.push(`坐下歇 ${ceilMinutes(node.restSeconds)} 分钟`);
+      if (passThrough) metaLines.push('途经（不计坐休分界）');
+      else if (node.restSeconds !== null) metaLines.push(`坐下歇 ${ceilMinutes(node.restSeconds)} 分钟`);
       else metaLines.push('休息时长待确认');
       const notices: NodeNotice[] = [];
-      if (node.seatFact.value !== true) {
+      if (node.seatFact.value === null) {
         notices.push({ text: '是否有座位待确认', severity: 'info' });
       }
       // 歇脚绕行对比（Task 4 / R-D）：对照缺失一律“待补充”，绝不用直线距离或估算冒充
@@ -286,7 +289,7 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
         indexText: null,
         titleText: title,
         metaLines,
-        badges: [{ text: '休息点', tone: 'neutral' as const }],
+        badges: [{ text: passThrough ? '途经' : '休息点', tone: 'neutral' as const }],
         notices,
       };
       blocks.push(nodeBlock);

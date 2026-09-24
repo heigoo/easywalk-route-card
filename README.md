@@ -80,7 +80,7 @@ npm run build                      # 生产构建（含独立 planner.worker 分
 | 跳站后自动补全新缺失路段（R07 V1.1） | `src/domain/pendingLegs.ts`、`src/features/planning/useMissingLegs.ts` |
 | 厕所/歇脚候选入路线与同站多候选 | `convertFacilityCandidateToRestNode`、`upsertFacilityFactForTarget`（recordKey） |
 | 连续步行超限有限插入已确认歇脚 | `src/domain/insertRest.ts`、`src/workers/planner.ts` `tryInsertRests` |
-| 厕所途经不计坐休分界 | `convertFacilityCandidateToRestNode`（seat=false） |
+| 厕所途经不计坐休分界 | `convertFacilityCandidateToRestNode`（seat=false）；卡片/编辑区同口径「途经」 |
 | 矩阵 pair 预算与插入边限量 | `MAX_MATRIX_PAIRS`、`MAX_INSERT_MATRIX_PAIRS` |
 | 开放时间严格文法与同义词表（星期X/工作日/24小时） | `src/domain/opening.ts` |
 | 入口未确认提示（不阻断矩阵） | `src/domain/status.ts` `unconfirmedEntrancePlaceNames` |

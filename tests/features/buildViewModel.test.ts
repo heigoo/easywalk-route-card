@@ -7,7 +7,7 @@ import type { Fact, OpeningSchedule, PlaceRef } from '../../shared/contracts/dom
 import { unknownFact } from '../../shared/contracts/domain';
 import { computeStats, evaluateConstraints } from '../../src/domain/compute';
 import { synthesizeCardStatus } from '../../src/domain/status';
-import { convertRestCandidateToRestNode, updateNode } from '../../src/domain/itinerary';
+import { convertRestCandidateToRestNode, updateNode, upsertNodeFacilityFact } from '../../src/domain/itinerary';
 import { buildCardViewModel } from '../../src/features/route-card/buildViewModel';
 import type { NodeBlock } from '../../src/features/route-card/viewModel';
 import { detourTripleOf, type DetourCompareMap } from '../../src/features/planning/useDetourCompare';
@@ -322,6 +322,28 @@ describe('候选转休息点后的卡片一致性（Task 3 / R-B）', () => {
     expect(restBlock!.role).toBe('rest');
     expect(restBlock!.badges.map((b) => b.text)).toContain('休息点');
     expect(restBlock!.notices.some((n) => n.text === '是否有座位待确认')).toBe(false);
+  });
+
+  it('厕所途经节点与编辑区同口径：途经（不计坐休分界），不写坐下歇、不问座位', () => {
+    const base = buildUnifiedSample();
+    const aId = base.nodeOrder[0];
+    let withToilet = upsertNodeFacilityFact(base, aId, 'toilet', 'name', candidateFact('东侧公厕', true));
+    withToilet = upsertNodeFacilityFact(
+      withToilet,
+      aId,
+      'toilet',
+      'location',
+      candidateFact({ longitude: 116.4, latitude: 39.91 }, true),
+    );
+    const toiletId = withToilet.facilities.find((f) => f.kind === 'toilet')!.id;
+    const { itinerary: after } = convertRestCandidateToRestNode(withToilet, toiletId, aId);
+    const vm = vmFor(after);
+    const restBlock = vm.blocks.find((b): b is NodeBlock => b.kind === 'node' && b.titleText === '东侧公厕');
+    expect(restBlock).toBeDefined();
+    expect(restBlock!.metaLines).toEqual(['途经（不计坐休分界）']);
+    expect(restBlock!.badges.map((b) => b.text)).toContain('途经');
+    expect(restBlock!.notices.some((n) => n.text === '是否有座位待确认')).toBe(false);
+    expect(restBlock!.metaLines.some((m) => m.includes('坐下歇'))).toBe(false);
   });
 });
 
