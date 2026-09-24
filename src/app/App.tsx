@@ -13,6 +13,8 @@ import { PlaceSearchPanel } from '../features/places/PlaceSearchPanel';
 import { placeFromSearch } from '../features/places/placeFromSearch';
 import { PlanningPanel } from '../features/planning/PlanningPanel';
 import { usePlanning } from '../features/planning/usePlanning';
+import { FestivalOverlay } from '../features/festival/FestivalOverlay';
+import { festiveFeatures } from '../features/festival/festival';
 import { addVisitNode, setEndpoint, upsertPlace } from '../domain/itinerary';
 import { safeFileName } from '../domain/format';
 import { Dialog } from '../components/Dialog';
@@ -120,6 +122,10 @@ export function App() {
 
   const [exportSignal, setExportSignal] = useState(0);
 
+  // 节庆动画（中秋·国庆）：节令窗口内默认开启，顶栏可手动开关；导出成功放烟花
+  const [festiveOn, setFestiveOn] = useState(() => festiveFeatures(new Date()).moon || festiveFeatures(new Date()).flags);
+  const [celebrateSignal, setCelebrateSignal] = useState(0);
+
   /** 切到预览：窄屏压入一条历史记录，使浏览器返回键回到编辑视图（第 9.3、13.4 节） */
   const goPreview = useCallback(() => {
     setView('preview');
@@ -181,6 +187,7 @@ export function App() {
         fileBaseName={fileBaseName}
         trigger={exportSignal}
         showTriggerButton={isWide}
+        onExported={() => setCelebrateSignal((n) => n + 1)}
       />
     </div>
   );
@@ -252,6 +259,15 @@ export function App() {
             title="打开行程列表"
           >
             行程：{tripNameOf(itinerary)}
+          </button>
+          <button
+            type="button"
+            className={styles.festToggleBtn}
+            onClick={() => setFestiveOn((v) => !v)}
+            aria-pressed={festiveOn}
+            title={festiveOn ? '关闭节庆动画' : '开启节庆动画'}
+          >
+            {festiveOn ? '🎑 节庆动画开' : '节庆动画关'}
           </button>
         </div>
       </header>
@@ -424,6 +440,9 @@ export function App() {
         onConfirm={confirmDeleteTrip}
         onCancel={() => setDeleting(null)}
       />
+
+      {/* 节庆动画层（中秋·国庆）：纯视觉覆盖，不拦截交互、不进入导出画面 */}
+      <FestivalOverlay enabled={festiveOn} celebrateSignal={celebrateSignal} />
     </div>
   );
 }

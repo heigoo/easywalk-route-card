@@ -19,6 +19,8 @@ export interface ExportPanelProps {
   trigger?: number;
   /** 是否渲染本面板内的导出按钮；窄屏由吸底操作栏承担主入口（需求 9.3） */
   showTriggerButton?: boolean;
+  /** 全部页面生成成功后回调一次（节庆动画等流程庆祝钩子，不影响导出结果） */
+  onExported?: () => void;
 }
 
 interface PageItem {
@@ -28,7 +30,7 @@ interface PageItem {
 
 type Phase = 'idle' | 'paginating' | 'rendering' | 'done' | 'failed';
 
-export function ExportPanel({ vm, statusKind, fileBaseName, trigger = 0, showTriggerButton = true }: ExportPanelProps) {
+export function ExportPanel({ vm, statusKind, fileBaseName, trigger = 0, showTriggerButton = true, onExported }: ExportPanelProps) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [pages, setPages] = useState<PageItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +84,7 @@ export function ExportPanel({ vm, statusKind, fileBaseName, trigger = 0, showTri
       }
       setPages(items);
       setPhase('done');
+      onExported?.();
     } catch (e) {
       if (e instanceof ExportError) {
         setError(e.message);

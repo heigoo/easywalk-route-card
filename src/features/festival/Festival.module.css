@@ -1,0 +1,10 @@
+/**
+ * 节庆动画层样式：纯覆盖层，不拦截交互。
+ * 层级 20：低于吸底操作条(30)与弹窗(40/41)，动画永不遮挡操作。
+ */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}

@@ -51,6 +51,14 @@
   --radius-dialog: 20px;
   --control-height: 48px;
 
+  /* 节庆动画（中秋·国庆装饰层，FestivalOverlay 画布取色用） */
+  --fest-moon: hsl(45 90% 88%);
+  --fest-moon-glow: hsl(42 95% 72%);
+  --fest-flag: hsl(356 72% 46%);
+  --fest-gold: hsl(43 92% 54%);
+  --fest-petal: hsl(36 70% 72%);
+  --fest-star: hsl(220 60% 88%);
+
   font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
   color-scheme: dark;
 }
