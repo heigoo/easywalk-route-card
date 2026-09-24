@@ -27,3 +27,13 @@ screenshots/
 *.local.png
 
 .iga/
+
+# 编辑器/工具本地状态
+.trae/
+
+# 临时补丁脚本（开发过程草稿，不入库）
+scripts/patch_*.py
+
+# 发帖素材（此前已从仓库移除，仅本机保留）
+docs/发帖素材/
+docs/发帖-*.md
