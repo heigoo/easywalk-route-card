@@ -245,7 +245,7 @@ describe('openingScheduleFromText：混合非法形态整体拒绝（任一子�
     ['词表外日期组', '周一至周五 09:00-17:00;节假日 09:00-10:00'],
     ['未列区间', '周二至周四 08:00-18:00'],
     ['词表外状态词', '周一 不营业'],
-    ['星期X 写法不在词表', '星期一 08:00-18:00'],
+    ['节假日仍不在词表', '节假日 09:00-10:00'],
     ['日期组后无状态也无时段', '周一至周五'],
     ['附加说明混入', '周一至周五 08:00-18:00 仅供参考'],
     ['重复覆盖同一天（跨日期组）', '每天 08:00-18:00;周六 09:00-10:00'],
@@ -257,6 +257,56 @@ describe('openingScheduleFromText：混合非法形态整体拒绝（任一子�
     ['空子段（多余分隔符）', '周一至周五 08:00-18:00;'],
   ])('%s：%s → null', (_label, text) => {
     expect(openingScheduleFromText(text, '2026-10-01', 'Asia/Shanghai')).toBeNull();
+  });
+});
+
+describe('openingScheduleFromText：词表扩展（星期X / 工作日 / 24小时·全天）', () => {
+  it('星期X 归一为周X：星期一 覆盖周一出游日', () => {
+    expect(openingScheduleFromText('星期一 08:00-18:00', '2026-09-28', 'Asia/Shanghai')).toEqual({
+      applicableDate: '2026-09-28',
+      timezone: 'Asia/Shanghai',
+      windows: [{ startLocalTime: '08:00', endLocalTime: '18:00' }],
+    });
+  });
+
+  it('星期天/星期日 归一为周日', () => {
+    for (const text of ['星期天 09:00-17:00', '星期日 09:00-17:00']) {
+      expect(openingScheduleFromText(text, '2026-10-04', 'Asia/Shanghai')?.windows).toEqual([
+        { startLocalTime: '09:00', endLocalTime: '17:00' },
+      ]);
+    }
+  });
+
+  it('工作日＝周一至周五：覆盖周四、不覆盖周六', () => {
+    expect(openingScheduleFromText('工作日 08:00-18:00', '2026-10-01', 'Asia/Shanghai')?.windows).toEqual([
+      { startLocalTime: '08:00', endLocalTime: '18:00' },
+    ]);
+    expect(openingScheduleFromText('工作日 08:00-18:00', '2026-10-03', 'Asia/Shanghai')).toBeNull();
+  });
+
+  it('24 小时/全天（含营业/开放）→ 00:00-23:59，覆盖任意出游日', () => {
+    for (const text of ['24小时', '24 小时', '24小时营业', '24小时开放', '全天', '全天开放', '全天营业']) {
+      expect(openingScheduleFromText(text, '2026-10-01', 'Asia/Shanghai')).toEqual({
+        applicableDate: '2026-10-01',
+        timezone: 'Asia/Shanghai',
+        windows: [{ startLocalTime: '00:00', endLocalTime: '23:59' }],
+      });
+    }
+  });
+
+  it('日期组 + 24 小时：工作日全天、周末休息', () => {
+    const text = '工作日 24小时;周末 休息';
+    expect(openingScheduleFromText(text, '2026-10-01', 'Asia/Shanghai')?.windows).toEqual([
+      { startLocalTime: '00:00', endLocalTime: '23:59' },
+    ]);
+    expect(openingScheduleFromText(text, '2026-10-03', 'Asia/Shanghai')?.windows).toEqual([]);
+  });
+
+  it('每日 24小时 前缀形态可解析；24:00 仍非法', () => {
+    expect(openingScheduleFromText('每日 24小时', '2026-10-02', 'Asia/Shanghai')?.windows).toEqual([
+      { startLocalTime: '00:00', endLocalTime: '23:59' },
+    ]);
+    expect(openingScheduleFromText('周一至周五 08:00-24:00', '2026-10-01', 'Asia/Shanghai')).toBeNull();
   });
 });
 

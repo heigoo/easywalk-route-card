@@ -10,6 +10,7 @@ import { activeSequence } from '../../../shared/contracts/domain';
 import { computeInputFingerprint } from '../../domain/fingerprint';
 import { listInsertableRestCandidates } from '../../domain/insertRest';
 import { applyPlannerCandidate, edgeKey, type MatrixEdgeValue } from '../../domain/planning';
+import { unconfirmedEntrancePlaceNames } from '../../domain/status';
 import { ApiRequestError, fetchWalkingMatrix, type MatrixNodeInput } from '../../services/api';
 import { createPlannerClient, type PlannerCandidate, type PlannerResult } from '../../workers';
 import { listCandidatePairs } from '../../workers/planner';
@@ -183,6 +184,10 @@ export function usePlanning(
       // 明确不可达的边写入 null；未查询/失败的边保持缺失（第 6.6 节）
       const notes: string[] = [];
       if (missing.length > 0) notes.push(`${missing.join('、')}，未纳入本次计算`);
+      const entranceNotes = unconfirmedEntrancePlaceNames(itinerary);
+      if (entranceNotes.length > 0) {
+        notes.push(`${entranceNotes.join('、')}入口未确认，步行时间可能按坐标中心估算`);
+      }
       if (matrix.failures.length > 0) {
         notes.push(`${matrix.failures.length} 段路线数据获取失败，相关方案标为待核验`);
       }

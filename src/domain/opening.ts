@@ -7,11 +7,28 @@
  * 裸时段混入分日文本等）→ 整体返回 null（宁缺勿假，禁止“半真”数据）。
  * 出游日期未被文本明确覆盖（明确开放或明确“休息/不开放”）→ 不写结构化时段，只留原文。
  * 解析结果仍需用户核对后才可信赖。
+ *
+ * 词表扩展（仍保守）：
+ * - 「星期X / 星期天」归一为「周X」；「工作日」归一为「周一至周五」；
+ * - 「24 小时 / 全天（开放/营业）」表达为当日 00:00-23:59（不跨零点、不用 24:00）。
  */
 import type { OpeningSchedule } from '../../shared/contracts/domain';
 
 /** 允许的前缀词：严格词表，词表外的任何描述（如“每周一至周日”）一律不接受 */
 const UNIFORM_PREFIXES = ['每日', '每天', '周一至周日', '全年'];
+
+/** 全天/24 小时：按 00:00-23:59 表达（不用 24:00，不跨零点） */
+const ALL_DAY_WINDOW = { startLocalTime: '00:00', endLocalTime: '23:59' } as const;
+const ALL_DAY_TOKEN_RE = /^(?:24\s*小时(?:营业|开放)?|全天(?:开放|营业)?)$/;
+
+/** 同义写法归一：星期X→周X（星期天/日→周日）、工作日→周一至周五 */
+function normalizeDayAliases(text: string): string {
+  return text
+    .replace(/星期天/g, '周日')
+    .replace(/星期日/g, '周日')
+    .replace(/星期([一二三四五六])/g, '周$1')
+    .replace(/工作日/g, '周一至周五');
+}
 
 /** 24 小时制时间：小时 0-23（1-2 位），分钟 0-59（必须 2 位） */
 const TIME = '([01]?\\d|2[0-3]):([0-5]\\d)';
@@ -60,9 +77,14 @@ export function openingScheduleFromText(
 ): OpeningSchedule | null {
   const weekday = weekdayOfDate(applicableDate);
   if (weekday === null) return null;
-  const uniform = parseUniformOpeningText(text);
+  const normalized = normalizeDayAliases(text);
+  // 裸「24 小时 / 全天」：整周全天（可带全周/工作日前缀）
+  if (isAllDayText(normalized)) {
+    return { applicableDate, timezone, windows: [{ ...ALL_DAY_WINDOW }] };
+  }
+  const uniform = parseUniformOpeningText(normalized);
   if (uniform) return { applicableDate, timezone, windows: [uniform] };
-  const byWeekday = parseDayClauses(text);
+  const byWeekday = parseDayClauses(normalized);
   if (!byWeekday) return null;
   const windows = byWeekday.get(weekday);
   // 出游日期未被文本明确覆盖：不写结构化时段
@@ -70,7 +92,14 @@ export function openingScheduleFromText(
   return { applicableDate, timezone, windows };
 }
 
-/** 单日词“周X”的 X（严格词表；“星期X”等写法不在词表内，一律拒绝） */
+/** 整段文本是否为「全天/24 小时」形态（可带全周或工作日日期组前缀） */
+function isAllDayText(text: string): boolean {
+  const t = text.trim();
+  if (ALL_DAY_TOKEN_RE.test(t)) return true;
+  return /^(每天|每日|周一至周日|全年|工作日|周一至周五)\s+(24\s*小时(?:营业|开放)?|全天(?:开放|营业)?)$/.test(t);
+}
+
+/** 单日词“周X”（星期X 已归一为周X） */
 const DAY_TOKEN = '周[一二三四五六日]';
 /**
  * 日期组：严格枚举（全周词/固定区间/周末/单日/逗号列表），未列即拒。
@@ -112,6 +141,9 @@ function parseDayClauses(text: string): Map<number, UniformOpeningWindow[]> | nu
     if (rest === '休息' || rest === '不开放') {
       // 明确不开放：该日时段为空数组（“明确覆盖”仍然成立）
       windows = [];
+    } else if (ALL_DAY_TOKEN_RE.test(rest.trim())) {
+      // 「24 小时 / 全天」按 00:00-23:59 表达
+      windows = [{ ...ALL_DAY_WINDOW }];
     } else {
       const parsed = parseWindowList(rest);
       if (!parsed) return null;
@@ -152,8 +184,9 @@ function weekdaysOfGroup(group: string): number[] | null {
   }
 }
 
-/** 时段列表：多个 HH:mm-HH:mm 以 `,`/`、` 分隔；任一段非法即整体 null */
+/** 时段列表：多个 HH:mm-HH:mm 以 `,`/`、` 分隔；任一段非法即整体 null；支持单段「24 小时/全天」 */
 function parseWindowList(text: string): UniformOpeningWindow[] | null {
+  if (ALL_DAY_TOKEN_RE.test(text.trim())) return [{ ...ALL_DAY_WINDOW }];
   const windows: UniformOpeningWindow[] = [];
   for (const part of text.split(WINDOW_SPLIT)) {
     const m = WINDOW_RE.exec(part.trim());

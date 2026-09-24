@@ -167,8 +167,9 @@ describe('附近候选检索（Task 3 子任务 3.1）', () => {
     stubNearby([poi('poi-1', '公园东门厕所', 120), poi('poi-2', '湖边公厕', null)]);
     render(<FacilityDialog open node={it.nodes[nodeId]} itinerary={it} onClose={() => undefined} onSave={vi.fn()} />);
 
-    // 半径默认 500 米
+    // 半径默认 500 米；检索范围口径写清「直线附近、不是沿路」
     expect(screen.getByLabelText('搜索半径')).toHaveValue('500');
+    expect(screen.getByText(/按站点坐标直线附近检索，不是沿步行路线/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '搜索' }));
 
     expect(await screen.findByText('公园东门厕所')).toBeInTheDocument();

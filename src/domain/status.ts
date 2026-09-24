@@ -3,8 +3,31 @@
  * 优先检查结构性无效输入 → 已知超限 → 缺失与未核验项；不同问题同时保留，不互相覆盖。
  */
 import type { Itinerary } from '../../shared/contracts/domain';
-import { activeVisitCount } from '../../shared/contracts/domain';
+import { activeSequence, activeVisitCount } from '../../shared/contracts/domain';
 import type { ConstraintVerdicts, TripStats } from './compute';
+
+/**
+ * 有效序列上「有坐标但入口未确认」的地点名（去重、按序列顺序）。
+ * 入口未确认不阻断矩阵，但可能把坐标中心当入口，须在计算/规划处提示。
+ */
+export function unconfirmedEntrancePlaceNames(it: Itinerary): string[] {
+  const seq = activeSequence(it);
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const id of seq) {
+    let placeId: string | undefined;
+    if (it.origin?.id === id) placeId = it.origin.placeId;
+    else if (it.destination?.id === id) placeId = it.destination.placeId;
+    else placeId = it.nodes[id]?.placeId;
+    const place = placeId ? it.places[placeId] : undefined;
+    if (!place?.location || place.entranceConfirmed) continue;
+    const name = place.name.trim() || '有地点';
+    if (seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+}
 
 export type CardKind = 'complete' | 'draft' | 'violated' | 'blocked';
 export type NoticeSeverity = 'info' | 'warning' | 'error';
@@ -61,6 +84,13 @@ export function synthesizeCardStatus(
 
   const missingCount = stats.missingFields.length;
   const unverifiedCount = countUnverifiedFacts(it);
+  const unconfirmedEntrances = unconfirmedEntrancePlaceNames(it);
+  if (unconfirmedEntrances.length > 0) {
+    notices.push({
+      text: `${unconfirmedEntrances.join('、')}入口未确认，步行时间可能按坐标中心估算，请核对可通行入口`,
+      severity: 'warning',
+    });
+  }
   if (missingCount > 0) {
     notices.push({
       text:
@@ -78,7 +108,12 @@ export function synthesizeCardStatus(
   }
 
   if (knownViolation) return { kind: 'violated', notices };
-  if (missingCount > 0 || unverifiedCount > 0 || stats.closingConflicts.length > 0) {
+  if (
+    missingCount > 0 ||
+    unverifiedCount > 0 ||
+    stats.closingConflicts.length > 0 ||
+    unconfirmedEntrances.length > 0
+  ) {
     return { kind: 'draft', notices };
   }
   return { kind: 'complete', notices };

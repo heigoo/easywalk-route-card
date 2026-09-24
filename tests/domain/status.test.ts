@@ -66,4 +66,15 @@ describe('卡片状态合成', () => {
   it('数据完整且无已知冲突 → complete', () => {
     expect(statusOf(base()).kind).toBe('complete');
   });
+
+  it('入口未确认但有坐标 → draft，并提示可能按坐标中心估算', () => {
+    let it = base();
+    const placeId = it.destination!.placeId;
+    it = upsertPlace(it, { ...it.places[placeId], entranceConfirmed: false });
+    const status = statusOf(it);
+    expect(status.kind).toBe('draft');
+    expect(
+      status.notices.some((n) => n.text.includes('入口未确认') && n.text.includes('坐标中心')),
+    ).toBe(true);
+  });
 });

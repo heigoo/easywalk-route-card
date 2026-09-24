@@ -454,6 +454,9 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
       {stairsOnly ? null : (
         <section className={editor.candidateBox} aria-label="搜索附近">
           <span className={editor.boxTitle}>搜索附近（地图候选，需你逐属性确认）</span>
+          <p className={editor.boxHint}>
+            按站点坐标直线附近检索，不是沿步行路线；路上的厕所/歇脚处可能搜不到。
+          </p>
           <div className={editor.searchRow}>
             <div className={editor.field}>
               <label htmlFor="nearby-category">类别</label>
@@ -601,7 +604,9 @@ export function FacilityDialog({ open, node, legId = null, preset, itinerary, on
             </ul>
           ) : null}
 
-          <p className={editor.boxHint}>候选只是候选：确认写入前不会记入行程；直线距离不能当步行路程或耗时用。</p>
+          <p className={editor.boxHint}>
+            候选只是候选：确认写入前不会记入行程；按直线附近检索、不是沿路；直线距离不能当步行路程或耗时用。
+          </p>
         </section>
       )}
 
