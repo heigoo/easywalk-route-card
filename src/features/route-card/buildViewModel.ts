@@ -63,6 +63,10 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
   });
 
   // ---- 摘要 ----
+  const seq = activeSequence(it);
+  const isEmptyRoute = seq.length === 0;
+  const restNodeCount = seq.filter((id) => it.nodes[id]?.kind === 'rest').length;
+  const unverifiedRestCount = Math.max(0, restNodeCount - stats.plannedRestCount);
   const totalWalkState: SummaryValueState =
     verdicts.totalWalk === 'FAIL'
       ? 'violated'
@@ -80,16 +84,26 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
           : 'unknown'
         : 'known';
 
+  // 空行程与“已核实坐休”口径（UX 评审修复）：未知不等于没有，不显示误导性的“0 分钟/0 次”
   const summaryItems: SummaryItem[] = [
     {
       key: 'totalWalk',
       labelText: '预计总步行',
-      valueText: minutesValueText(stats.totalWalkSeconds ?? stats.totalWalkKnownSeconds),
-      unitText: '分钟',
-      state: totalWalkState,
-      noteText:
-        stats.totalWalkSeconds === null
-          ? `已知约 ${minutesValueText(stats.totalWalkKnownSeconds)} 分钟，另有 ${stats.missingFields.length} 项待补充`
+      valueText: isEmptyRoute
+        ? '—'
+        : stats.totalWalkSeconds === null
+          ? stats.totalWalkKnownSeconds > 0
+            ? minutesValueText(stats.totalWalkKnownSeconds)
+            : '待确认'
+          : minutesValueText(stats.totalWalkSeconds),
+      unitText: isEmptyRoute || (stats.totalWalkSeconds === null && stats.totalWalkKnownSeconds === 0) ? '' : '分钟',
+      state: isEmptyRoute ? 'unknown' : totalWalkState,
+      noteText: isEmptyRoute
+        ? '添加景点后计算'
+        : stats.totalWalkSeconds === null
+          ? stats.totalWalkKnownSeconds > 0
+            ? `已知约 ${minutesValueText(stats.totalWalkKnownSeconds)} 分钟，另有 ${stats.missingFields.length} 项待补充`
+            : `步行数据待补充（共 ${stats.missingFields.length} 项）`
           : verdicts.totalWalk === 'FAIL'
             ? '超过你设置的上限'
             : null,
@@ -97,37 +111,47 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
     {
       key: 'totalDuration',
       labelText: '预计全程用时',
-      valueText: minutesValueText(stats.totalDurationSeconds ?? stats.totalDurationKnownSeconds),
-      unitText: '分钟',
-      state: stats.totalDurationSeconds === null ? 'partial' : 'known',
+      valueText: isEmptyRoute
+        ? '—'
+        : stats.totalDurationSeconds === null
+          ? stats.totalDurationKnownSeconds > 0
+            ? minutesValueText(stats.totalDurationKnownSeconds)
+            : '待确认'
+          : minutesValueText(stats.totalDurationSeconds),
+      unitText: isEmptyRoute || (stats.totalDurationSeconds === null && stats.totalDurationKnownSeconds === 0) ? '' : '分钟',
+      state: isEmptyRoute ? 'unknown' : stats.totalDurationSeconds === null ? 'partial' : 'known',
       noteText:
-        stats.totalDurationSeconds === null
-          ? '部分时长未知，不显示精确结束时间'
-          : null,
+        isEmptyRoute || stats.totalDurationSeconds !== null
+          ? null
+          : '部分时长未知，不显示精确结束时间',
     },
     {
       key: 'longestWalk',
       labelText: '最长连续步行',
       valueText:
-        stats.longestContinuousWalkSeconds !== null
-          ? minutesValueText(stats.longestContinuousWalkSeconds)
-          : '待确认',
-      unitText: stats.longestContinuousWalkSeconds !== null ? '分钟' : '',
-      state: longestState,
+        isEmptyRoute || stats.longestContinuousWalkSeconds === null
+          ? isEmptyRoute
+            ? '—'
+            : '待确认'
+          : minutesValueText(stats.longestContinuousWalkSeconds),
+      unitText: isEmptyRoute || stats.longestContinuousWalkSeconds === null ? '' : '分钟',
+      state: isEmptyRoute ? 'unknown' : longestState,
       noteText:
-        verdicts.continuousWalk === 'FAIL'
-          ? '超过你设置的上限'
-          : stats.longestContinuousWalkSeconds === null
-            ? '休息或园内步行信息待确认'
-            : null,
+        isEmptyRoute
+          ? null
+          : verdicts.continuousWalk === 'FAIL'
+            ? '超过你设置的上限'
+            : stats.longestContinuousWalkSeconds === null
+              ? '休息或园内步行信息待确认'
+              : null,
     },
     {
       key: 'restCount',
-      labelText: '计划休息',
-      valueText: String(stats.plannedRestCount),
-      unitText: '次',
-      state: 'known',
-      noteText: null,
+      labelText: '已核实坐休',
+      valueText: isEmptyRoute ? '—' : String(stats.plannedRestCount),
+      unitText: isEmptyRoute ? '' : '次',
+      state: isEmptyRoute ? 'unknown' : 'known',
+      noteText: isEmptyRoute || unverifiedRestCount === 0 ? null : '有休息点未计入（座位或时长待核实）',
     },
   ];
 
@@ -155,7 +179,6 @@ export function buildCardViewModel(input: BuildInput): CardViewModel {
   }
 
   // ---- 逐站节点 ----
-  const seq = activeSequence(it);
   const activeVisitIds = seq.filter((id) => {
     const n = it.nodes[id];
     return n?.kind === 'visit';

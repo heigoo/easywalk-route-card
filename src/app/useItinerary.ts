@@ -251,13 +251,13 @@ export function useItinerary(
   const rebuildIndex = useCallback((): boolean => {
     const result = store.rebuildIndex();
     if (!result.ok) {
-      setTripsError(`重建索引失败：${result.error}`);
+      setTripsError(`修复行程列表失败：${result.error}`);
       return false;
     }
     setTrips(result.items);
     setTripsError(
       result.skippedIds.length > 0
-        ? `已重建索引，但有 ${result.skippedIds.length} 条行程数据无法读取，其原数据仍保留在本机`
+        ? `已修复行程列表，但有 ${result.skippedIds.length} 条行程数据无法读取，其原数据仍保留在本机`
         : null,
     );
     // 重建成功后清除“索引损坏”提示；其它载入错误语义保持不变

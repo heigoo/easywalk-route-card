@@ -99,7 +99,7 @@ export function RouteNodeCard({
           {place?.name ?? '未命地点'}
         </span>
         {isVisit ? (
-          <span className={`${styles.badge} ${node.required ? '' : 'brand'}`}>{node.required ? '必去' : '可选 · 累了可跳过'}</span>
+          <span className={`${styles.badge} ${node.required ? '' : styles.brand}`}>{node.required ? '必去' : '可选 · 累了可跳过'}</span>
         ) : (
           <span className={styles.badge}>休息点</span>
         )}
@@ -146,18 +146,24 @@ export function RouteNodeCard({
         <button type="button" className={`${styles.btn} ${styles.small}`} onClick={onFacility}>
           设施备注
         </button>
-        <button type="button" className={`${styles.btn} ${styles.small}`} onClick={onMoveUp} disabled={isFirst} aria-label="上移">
-          上移
-        </button>
-        <button type="button" className={`${styles.btn} ${styles.small}`} onClick={onMoveDown} disabled={isLast} aria-label="下移">
-          下移
-        </button>
         <button type="button" className={`${styles.btn} ${styles.small}`} onClick={onSkip}>
           跳过此站
         </button>
-        <button type="button" className={`${styles.btn} ${styles.small}`} onClick={onDelete}>
-          删除
-        </button>
+        {/* 次要与危险操作收纳（认知负荷）：排序与删除不占常驻视线，仍全键盘可达 */}
+        <details className={styles.moreActions}>
+          <summary className={`${styles.btn} ${styles.small}`}>更多操作</summary>
+          <div className={styles.moreActionsRow}>
+            <button type="button" className={`${styles.btn} ${styles.small}`} onClick={onMoveUp} disabled={isFirst} aria-label="上移">
+              上移
+            </button>
+            <button type="button" className={`${styles.btn} ${styles.small}`} onClick={onMoveDown} disabled={isLast} aria-label="下移">
+              下移
+            </button>
+            <button type="button" className={`${styles.btn} ${styles.small}`} onClick={onDelete}>
+              删除
+            </button>
+          </div>
+        </details>
       </div>
     </article>
   );

@@ -192,7 +192,6 @@ export function App() {
         apply={apply}
         stats={stats}
         cardStatus={cardStatus}
-        onShowPreview={goPreview}
         onDeleteAll={resetAll}
         onReplaceItinerary={replace}
       />
@@ -236,7 +235,7 @@ export function App() {
             ) : loadError === 'unsupported' ? (
               <span className={styles.saveError}>本地数据版本不识别，未覆盖原内容</span>
             ) : loadError === 'indexCorrupt' ? (
-              <span className={styles.saveError}>行程索引损坏，各行程数据仍保留，可在行程列表中重建索引</span>
+              <span className={styles.saveError}>行程列表已损坏，各行程数据仍保留，可在行程列表中修复</span>
             ) : loadError === 'migrationFailed' ? (
               <span className={styles.saveError}>旧数据迁移未完成，原数据已保留，请重试</span>
             ) : saveError ? (
@@ -245,8 +244,14 @@ export function App() {
               <span>{saveLabel}</span>
             )}
           </div>
-          <button type="button" className={styles.tripSwitcherBtn} onClick={openTrips}>
-            行程切换器
+          <button
+            type="button"
+            className={styles.tripSwitcherBtn}
+            onClick={openTrips}
+            aria-label="行程列表"
+            title="打开行程列表"
+          >
+            行程：{tripNameOf(itinerary)}
           </button>
         </div>
       </header>
@@ -255,7 +260,7 @@ export function App() {
         <nav className={styles.tabs} aria-label="视图切换">
           <button
             type="button"
-            className={`${styles.tab} ${view === 'edit' ? 'active' : ''}`}
+            className={`${styles.tab} ${view === 'edit' ? styles.active : ''}`}
             onClick={() => setView('edit')}
             aria-pressed={view === 'edit'}
           >
@@ -263,7 +268,7 @@ export function App() {
           </button>
           <button
             type="button"
-            className={`${styles.tab} ${view === 'preview' ? 'active' : ''}`}
+            className={`${styles.tab} ${view === 'preview' ? styles.active : ''}`}
             onClick={goPreview}
             aria-pressed={view === 'preview'}
           >
@@ -309,7 +314,7 @@ export function App() {
         open={tripsOpen}
         onOpenChange={(open) => (open ? setTripsOpen(true) : closeTrips())}
         title="行程列表"
-        description="可新建、切换、复制、重命名或删除行程；删除整份行程记录需二次确认，区别于“清空内容”。"
+        description="可新建、切换、复制、重命名或删除行程；删除整份行程记录需二次确认，区别于“清空行程内容”。"
       >
         <div className={styles.tripPanel}>
           <div className={styles.tripToolbar}>
@@ -317,7 +322,7 @@ export function App() {
               新建行程
             </button>
             <button type="button" className={styles.tripBtn} onClick={rebuildIndex}>
-              重建行程索引
+              修复行程列表
             </button>
           </div>
           {tripsError ? (

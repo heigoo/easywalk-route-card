@@ -33,14 +33,14 @@ export function RouteCard({ vm, blocks, footText, continuationLabelText, innerRe
     <div className={`paper ${styles.paper}`} ref={innerRef} data-testid="route-card-paper">
       {continuationLabelText ? <div className={styles.continuation}>{continuationLabelText}</div> : null}
       {statusLabel ? (
-        <div className={`${styles.statusLine} ${vm.status.kind}`} role="note">
+        <div className={`${styles.statusLine} ${styles[vm.status.kind]}`} role="note">
           {statusLabel}
         </div>
       ) : null}
       {list.map((block) => (
         <Block key={`${block.id}-${'partIndex' in block ? (block as { partIndex?: number }).partIndex ?? 0 : 0}`} block={block} />
       ))}
-      <div className={styles.footer}>{footText ?? vm.footText.replace('{page}/{total}', '预览')}</div>
+      <div className={styles.footer}>{footText ?? vm.footText.replace('第 {page}/{total} 张', '预览')}</div>
     </div>
   );
 }
@@ -80,14 +80,13 @@ function Block({ block }: { block: CardBlock }) {
           <div className={styles.title}>{block.titleText}</div>
           {block.subtitleText ? <div className={styles.subtitle}>{block.subtitleText}</div> : null}
           {block.dateText ? <div className={styles.dateLine}>出游日期 {block.dateText}</div> : null}
-          <div className={styles.dateLine}>生成于 {block.generatedAtText}</div>
         </header>
       );
     case 'summary':
       return (
         <section className={styles.summary} aria-label="行程摘要">
           {block.items.map((item) => (
-            <div key={item.key} className={`${styles.summaryItem} ${item.state === 'violated' ? 'violated' : item.state === 'known' ? '' : 'warn'}`}>
+            <div key={item.key} className={`${styles.summaryItem} ${item.state === 'violated' ? styles.violated : item.state === 'known' ? '' : styles.warn}`}>
               <span className={styles.label}>{item.labelText}</span>
               <span className={styles.value}>
                 {item.valueText}
@@ -100,7 +99,7 @@ function Block({ block }: { block: CardBlock }) {
       );
     case 'notice':
       return (
-        <div className={`${styles.notice} ${block.severity}`} role="note" data-split-target>
+        <div className={`${styles.notice} ${styles[block.severity]}`} role="note" data-split-target>
           {block.text}
         </div>
       );
@@ -114,7 +113,7 @@ function Block({ block }: { block: CardBlock }) {
             {block.role === 'destination' ? <span className={styles.nodeRole}>终点 · </span> : null}
             <span className={styles.nodeTitle}>{block.titleText}</span>
             {block.badges.map((b) => (
-              <span key={b.text} className={`${styles.badge} ${b.tone === 'warning' ? 'warning' : ''}`}>
+              <span key={b.text} className={`${styles.badge} ${b.tone === 'warning' ? styles.warning : ''}`}>
                 {b.text}
               </span>
             ))}
@@ -133,7 +132,7 @@ function Block({ block }: { block: CardBlock }) {
       );
     case 'leg':
       return (
-        <div className={`${styles.leg} ${block.state === 'missing' ? 'missing' : ''}`}>
+        <div className={`${styles.leg} ${block.state === 'missing' ? styles.missing : ''}`}>
           <span className={styles.legMain}>{block.mainText}</span>
           {block.secondaryText ? <span className={styles.legSecondary}>{block.secondaryText}</span> : null}
         </div>

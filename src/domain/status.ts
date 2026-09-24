@@ -63,7 +63,10 @@ export function synthesizeCardStatus(
   const unverifiedCount = countUnverifiedFacts(it);
   if (missingCount > 0) {
     notices.push({
-      text: `已知步行约 ${Math.ceil(stats.totalWalkKnownSeconds / 60)} 分钟，另有 ${missingCount} 项待补充`,
+      text:
+        stats.totalWalkKnownSeconds > 0
+          ? `已知步行约 ${Math.ceil(stats.totalWalkKnownSeconds / 60)} 分钟，另有 ${missingCount} 项待补充`
+          : `步行数据待补充（共 ${missingCount} 项）`,
       severity: 'info',
     });
   }

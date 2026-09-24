@@ -43,7 +43,6 @@ export interface TripEditorProps {
   apply: (fn: (it: Itinerary) => Itinerary) => void;
   stats: TripStats;
   cardStatus: CardStatus;
-  onShowPreview: () => void;
   onDeleteAll: () => void;
   /** 导入备份确认后：整体替换当前行程并按既有机制持久化 */
   onReplaceItinerary: (next: Itinerary) => void;
@@ -77,7 +76,6 @@ export function TripEditor({
   apply,
   stats,
   cardStatus,
-  onShowPreview,
   onDeleteAll,
   onReplaceItinerary,
 }: TripEditorProps) {
@@ -105,6 +103,10 @@ export function TripEditor({
   const skippedNodes = it.nodeOrder.map((id) => it.nodes[id]).filter((n) => n?.skipped);
 
   const amapLegs = Object.values(it.legs).filter((l) => l.durationSource === 'amap');
+
+  // 汇总口径展示（UX 评审修复）：空行程不显示“0 分钟/0 次”，未核实休息点显式说明
+  const isEmptyTrip = seq.length === 0;
+  const restNodeCount = seq.filter((id) => it.nodes[id]?.kind === 'rest').length;
 
   const nameOf = (id: string): string => {
     if (it.origin?.id === id) return it.places[it.origin.placeId]?.name ?? '起点';
@@ -266,14 +268,49 @@ export function TripEditor({
       </div>
 
       <div className={styles.summary} role="status" aria-label="步行与用时汇总">
-        <SummaryItem label="预计总步行" value={stats.totalWalkSeconds ?? stats.totalWalkKnownSeconds} unit="分钟" warn={stats.totalWalkSeconds === null} note={stats.totalWalkSeconds === null ? `已知约 ${ceilMinutes(stats.totalWalkKnownSeconds)} 分钟` : undefined} />
-        <SummaryItem label="预计全程用时" value={stats.totalDurationSeconds ?? stats.totalDurationKnownSeconds} unit="分钟" warn={stats.totalDurationSeconds === null} />
-        <SummaryItem label="最长连续步行" value={stats.longestContinuousWalkSeconds} unit="分钟" warn={stats.longestContinuousWalkSeconds === null} note={stats.longestContinuousWalkSeconds === null ? '待确认' : undefined} />
-        <SummaryItem label="计划休息" value={stats.plannedRestCount} unit="次" warn={false} />
+        <SummaryItem
+          label="预计总步行"
+          value={stats.totalWalkSeconds ?? (stats.totalWalkKnownSeconds > 0 ? stats.totalWalkKnownSeconds : null)}
+          unit="分钟"
+          warn={stats.totalWalkSeconds === null}
+          empty={isEmptyTrip}
+          note={
+            isEmptyTrip
+              ? '添加景点后计算'
+              : stats.totalWalkSeconds === null
+                ? stats.totalWalkKnownSeconds > 0
+                  ? `已知约 ${ceilMinutes(stats.totalWalkKnownSeconds)} 分钟`
+                  : '步行数据待补充'
+                : undefined
+          }
+        />
+        <SummaryItem
+          label="预计全程用时"
+          value={stats.totalDurationSeconds ?? (stats.totalDurationKnownSeconds > 0 ? stats.totalDurationKnownSeconds : null)}
+          unit="分钟"
+          warn={stats.totalDurationSeconds === null}
+          empty={isEmptyTrip}
+        />
+        <SummaryItem
+          label="最长连续步行"
+          value={stats.longestContinuousWalkSeconds}
+          unit="分钟"
+          warn={stats.longestContinuousWalkSeconds === null}
+          empty={isEmptyTrip}
+          note={!isEmptyTrip && stats.longestContinuousWalkSeconds === null ? '休息或园内步行信息待确认' : undefined}
+        />
+        <SummaryItem
+          label="已核实坐休"
+          value={stats.plannedRestCount}
+          unit="次"
+          warn={false}
+          empty={isEmptyTrip}
+          note={!isEmptyTrip && restNodeCount > stats.plannedRestCount ? '有休息点未计入（座位或时长待核实）' : undefined}
+        />
       </div>
 
       {amapLegs.length > 0 ? (
-        <div className={`${styles.reminder} info`} role="note">
+        <div className={`${styles.reminder} ${styles.info}`} role="note">
           <span>
             有 {amapLegs.length} 段步行时间来自地图查询，仅当前会话有效；采纳后可离线查看与导出。
           </span>
@@ -288,15 +325,18 @@ export function TripEditor({
       ) : null}
 
       {convertHint ? (
-        <div className={`${styles.reminder} info`} role="note">
+        <div className={`${styles.reminder} ${styles.info}`} role="note">
           <span>已加入路线，请补充新路段步行时间</span>
           {convertHint.locationMissing ? <span>位置待确认，暂不能自动获取步行数据</span> : null}
+          <button type="button" className={`${styles.btn} ${styles.small}`} onClick={() => setConvertHint(null)}>
+            知道了
+          </button>
         </div>
       ) : null}
 
       {cardStatus.kind === 'violated' || cardStatus.kind === 'draft' || cardStatus.kind === 'blocked'
         ? cardStatus.notices.map((n, i) => (
-            <div key={i} className={`${styles.reminder} ${n.severity === 'error' ? 'error' : n.severity === 'warning' ? 'warning' : 'info'}`} role="note">
+            <div key={i} className={`${styles.reminder} ${n.severity === 'error' ? styles.error : n.severity === 'warning' ? styles.warning : styles.info}`} role="note">
               <span>{n.text}</span>
             </div>
           ))
@@ -394,9 +434,6 @@ export function TripEditor({
         <button type="button" className={styles.btn} onClick={() => setAdding('rest')}>
           添加休息点
         </button>
-        <button type="button" className={`${styles.btn} ${styles.primary}`} onClick={onShowPreview} style={{ marginLeft: 'auto' }}>
-          预览路线卡
-        </button>
       </div>
 
       <div className={styles.backupRow}>
@@ -423,14 +460,14 @@ export function TripEditor({
       </div>
 
       {importError ? (
-        <div className={`${styles.reminder} error`} role="alert">
+        <div className={`${styles.reminder} ${styles.error}`} role="alert">
           <span>{importError}</span>
         </div>
       ) : null}
 
       <div className={styles.dangerZone}>
         <button type="button" className={`${styles.btn} ${styles.danger} ${styles.small}`} onClick={() => setConfirmDeleteAll(true)}>
-          删除整份行程
+          清空行程内容
         </button>
       </div>
 
@@ -534,9 +571,9 @@ export function TripEditor({
 
       <ConfirmDialog
         open={confirmDeleteAll}
-        title="删除整份行程？"
-        description="将清除本机保存的这份行程，且无法恢复。建议先导出图片留存。"
-        confirmText="确认删除"
+        title="清空行程内容？"
+        description="将清空当前行程的全部内容（行程记录保留、其他行程不受影响），且无法恢复。建议先导出图片留存。"
+        confirmText="确认清空"
         danger
         onConfirm={() => {
           setConfirmDeleteAll(false);
@@ -548,12 +585,12 @@ export function TripEditor({
   );
 }
 
-function SummaryItem({ label, value, unit, warn, note }: { label: string; value: number | null; unit: string; warn: boolean; note?: string }) {
+function SummaryItem({ label, value, unit, warn, note, empty }: { label: string; value: number | null; unit: string; warn: boolean; note?: string; empty?: boolean }) {
   return (
     <div className={styles.summaryItem}>
       <span className={styles.label}>{label}</span>
-      <span className={`${styles.value} ${warn ? 'warn' : ''}`}>
-        {value === null ? '待确认' : `${ceilMinutes(value)} ${unit}`}
+      <span className={`${styles.value} ${empty ? styles.empty : warn ? styles.warn : ''}`}>
+        {empty ? '—' : value === null ? '待确认' : `${ceilMinutes(value)} ${unit}`}
       </span>
       {note ? <span className={styles.note}>{note}</span> : null}
     </div>
@@ -582,7 +619,7 @@ function LegRow({
   // 地图报告了阶梯才提示；未返回不生成“无台阶”结论（未知不等于没有）
   const stairsReported = leg.reportedFeatures.some((f) => f.kind === 'stairs');
   return (
-    <div className={`${styles.legRow} ${ready ? '' : 'missing'}`}>
+    <div className={`${styles.legRow} ${ready ? '' : styles.missing}`}>
       <span aria-live="polite">
         ↓ {text}
         {leg.durationSource === 'adopted' ? ' · 已采纳地图估算' : ''}

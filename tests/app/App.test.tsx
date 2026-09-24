@@ -136,19 +136,19 @@ describe('应用组件流程', () => {
     expect(screen.getByRole('article', { name: '可选景点丁' })).toBeInTheDocument();
   });
 
-  it('删除整份行程需二次确认；取消不损失内容（A10）', async () => {
+  it('清空行程内容需二次确认；取消不损失内容（A10）', async () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole('button', { name: '添加景点' }));
     await user.type(screen.getByLabelText('名称'), '示例景点戊');
     await user.click(screen.getByRole('button', { name: '添加' }));
 
-    await user.click(screen.getByRole('button', { name: '删除整份行程' }));
+    await user.click(screen.getByRole('button', { name: '清空行程内容' }));
     await user.click(screen.getByRole('button', { name: '取消' }));
     expect(screen.getByText('示例景点戊')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '删除整份行程' }));
-    await user.click(screen.getByRole('button', { name: '确认删除' }));
+    await user.click(screen.getByRole('button', { name: '清空行程内容' }));
+    await user.click(screen.getByRole('button', { name: '确认清空' }));
     expect(screen.queryByText('示例景点戊')).not.toBeInTheDocument();
   });
 
@@ -375,7 +375,7 @@ async function setTitle(user: ReturnType<typeof userEvent.setup>, title: string)
 
 /** 打开行程列表面板 */
 async function openTripsPanel(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: '行程切换器' }));
+  await user.click(screen.getByRole('button', { name: '行程列表' }));
   return screen.getByRole('dialog', { name: '行程列表' });
 }
 
@@ -390,7 +390,7 @@ describe('多行程管理（Task 6）', () => {
     await addPlace(user, '面板景点');
     const panel = await openTripsPanel(user);
     expect(within(panel).getByRole('button', { name: '新建行程' })).toBeInTheDocument();
-    expect(within(panel).getByRole('button', { name: '重建行程索引' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: '修复行程列表' })).toBeInTheDocument();
     // 列出行程（标题/出游日期/更新时间）
     expect(within(panel).getByText('未命名行程')).toBeInTheDocument();
     expect(within(panel).getByText(/出游日期：/)).toBeInTheDocument();

@@ -128,6 +128,11 @@
   color: var(--warn-text);
 }
 
+.summaryItem .value.empty {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
 .summaryItem .note {
   font-size: var(--font-small);
   color: var(--warn-text);
@@ -234,6 +239,35 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
+}
+
+/* 节点卡“更多操作”收纳（认知负荷）：次要与危险操作不占常驻视线 */
+.moreActions {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.moreActions summary {
+  list-style: none;
+}
+
+.moreActions summary::-webkit-details-marker {
+  display: none;
+}
+
+.moreActions summary::after {
+  content: ' ▾';
+}
+
+.moreActions[open] summary::after {
+  content: ' ▴';
+}
+
+.moreActionsRow {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
 }
 
 /* 路段连接行 */
